@@ -35,7 +35,6 @@ type BonusCounts = Record<BG, number>;
 interface PersistedState {
   data: Data;
   history: string[][];
-  activeBG: BG;
   submittedMvps: SubmittedMvp[];
   seasonTracker: SeasonTracker;
   bonusDraft: BonusCounts;
@@ -44,6 +43,7 @@ interface PersistedState {
 }
 
 const STORAGE_KEY = "war-mvp-dashboard-state-v1";
+const ACTIVE_BG_STORAGE_KEY = "war-mvp-active-bg-v1";
 const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global";
 
 const getStateRef = "state:getState" as any;
@@ -116,7 +116,6 @@ const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, f
   return {
     data: (parsed.data as Data) || createInitialData(),
     history: Array.isArray(parsed.history) ? parsed.history : [],
-    activeBG: parsed.activeBG && BG_NAMES.includes(parsed.activeBG as BG) ? (parsed.activeBG as BG) : "BG1",
     submittedMvps: Array.isArray(parsed.submittedMvps) ? parsed.submittedMvps : [],
     seasonTracker:
       parsed.seasonTracker && typeof parsed.seasonTracker === "object" ? (parsed.seasonTracker as SeasonTracker) : {},
@@ -184,7 +183,6 @@ export default function App() {
 
     setData(snapshot.data);
     setHistory(snapshot.history);
-    setActiveBG(snapshot.activeBG);
     setSubmittedMvps(snapshot.submittedMvps);
     setSeasonTracker(snapshot.seasonTracker || {});
     setBonusDraft(snapshot.bonusDraft || emptyBonusCounts());
@@ -213,6 +211,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    try {
+      const savedBg = localStorage.getItem(ACTIVE_BG_STORAGE_KEY);
+      if (savedBg && BG_NAMES.includes(savedBg as BG)) {
+        setActiveBG(savedBg as BG);
+      }
+    } catch {
+      // Ignore local UI preference read errors.
+    }
+  }, []);
+
+  useEffect(() => {
     if (!isHydrated || !isSignedIn) return;
     if (remoteState === undefined) return;
 
@@ -237,7 +246,6 @@ export default function App() {
     const snapshot: PersistedState = {
       data,
       history,
-      activeBG,
       submittedMvps,
       seasonTracker,
       bonusDraft,
@@ -254,7 +262,15 @@ export default function App() {
         void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
       }, 500);
     }
-  }, [isHydrated, isSignedIn, data, history, activeBG, submittedMvps, seasonTracker, bonusDraft, bonusHistory, saveCloudState]);
+  }, [isHydrated, isSignedIn, data, history, submittedMvps, seasonTracker, bonusDraft, bonusHistory, saveCloudState]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_BG_STORAGE_KEY, activeBG);
+    } catch {
+      // Ignore local UI preference write errors.
+    }
+  }, [activeBG]);
 
   const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
     setData((prev) => {
@@ -334,7 +350,6 @@ export default function App() {
     const resetSnapshot: PersistedState = {
       data: createInitialData(),
       history: [],
-      activeBG: "BG1",
       submittedMvps: [],
       seasonTracker: {},
       bonusDraft: emptyBonusCounts(),
@@ -343,6 +358,8 @@ export default function App() {
     };
     latestUpdatedAtRef.current = resetSnapshot.updatedAt;
     applySnapshot(resetSnapshot);
+    setActiveBG("BG1");
+    localStorage.setItem(ACTIVE_BG_STORAGE_KEY, "BG1");
     if (isSignedIn) {
       void saveCloudState({ roomId: ROOM_ID, state: resetSnapshot, updatedAt: resetSnapshot.updatedAt });
     }
