@@ -10,25 +10,52 @@ body {
   margin: 0;
   background: #f3f5f8;
   color: #1f2937;
+  overflow-x: hidden;
 }
 
 .app-shell {
   min-height: 100vh;
-  padding: 14px 14px 28px;
+  padding: 18px 14px 28px;
+  margin: 0 auto;
+}
+
+@media (min-width: 900px) {
+  .app-shell {
+    width: calc(100% / 1.15);
+    transform: scale(1.15);
+    transform-origin: top center;
+    min-height: calc(100vh / 1.15);
+  }
+}
+
+.top-bar {
+  width: min(860px, calc(100vw - 28px));
+  margin: 0 auto 8px;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.top-user {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .app-title {
-  margin: 8px 0 20px;
+  margin: 0 0 20px;
   text-align: center;
-  font-size: clamp(1.9rem, 2.5vw, 2.8rem);
+  font-size: clamp(2rem, 2.5vw, 3rem);
   line-height: 1.12;
   letter-spacing: -0.02em;
-  font-weight: 700;
-  color: #1f2937;
+  font-weight: 800;
+  color: #1f2a3d;
 }
 
 .sync-note {
-  margin: -8px auto 14px;
+  margin: 2px auto 14px;
   width: min(860px, calc(100vw - 28px));
   color: #64748b;
   font-size: 0.8rem;
@@ -39,7 +66,7 @@ body {
   display: flex;
   justify-content: center;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .tab-btn {
@@ -76,7 +103,7 @@ body {
 }
 
 .card-main {
-  padding: 12px;
+  padding: 12px 12px 14px;
 }
 
 .card-main-content,
@@ -85,7 +112,7 @@ body {
 }
 
 .section-title {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   text-align: center;
   font-size: clamp(1.4rem, 2vw, 1.8rem);
   font-weight: 700;
@@ -98,7 +125,7 @@ body {
   grid-template-columns: minmax(0, 1fr) 132px 132px 70px;
   gap: 10px;
   align-items: center;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   padding: 0 10px;
   color: #5b6778;
   font-size: 0.78rem;
@@ -120,7 +147,7 @@ body {
   border: 1px solid transparent;
   border-radius: 10px;
   padding: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .player-row.is-mvp {
@@ -177,7 +204,7 @@ body {
   display: flex;
   justify-content: center;
   gap: 8px;
-  margin: 28px auto 28px;
+  margin: 24px auto 28px;
 }
 
 .btn-primary,
@@ -306,6 +333,20 @@ body {
 @media (max-width: 760px) {
   .app-shell {
     padding: 10px 8px 20px;
+  }
+
+  .top-bar {
+    width: calc(100vw - 16px);
+    margin-bottom: 6px;
+  }
+
+  .top-user {
+    right: 2px;
+  }
+
+  .app-title {
+    font-size: 2rem;
+    margin-bottom: 16px;
   }
 
   .tabs-wrap {

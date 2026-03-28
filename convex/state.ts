@@ -4,9 +4,6 @@ import { mutation, query } from "./_generated/server";
 export const getState = query({
   args: { roomId: v.string() },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
     const row = await ctx.db
       .query("warStates")
       .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
@@ -23,7 +20,6 @@ export const saveState = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
 
     const existing = await ctx.db
       .query("warStates")
@@ -34,7 +30,7 @@ export const saveState = mutation({
       await ctx.db.patch(existing._id, {
         state: args.state,
         updatedAt: args.updatedAt,
-        updatedBy: identity.subject,
+        updatedBy: identity?.subject ?? "anonymous",
       });
       return existing._id;
     }
@@ -43,7 +39,7 @@ export const saveState = mutation({
       roomId: args.roomId,
       state: args.state,
       updatedAt: args.updatedAt,
-      updatedBy: identity.subject,
+      updatedBy: identity?.subject ?? "anonymous",
     });
   },
 });

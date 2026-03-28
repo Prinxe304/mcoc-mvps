@@ -263,10 +263,12 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <div className="action-row" style={{ justifyContent: "space-between" }}>
+      <div className="top-bar">
         <h1 className="app-title">⚔ War MVP Dashboard</h1>
         <SignedIn>
-          <UserButton />
+          <div className="top-user">
+            <UserButton />
+          </div>
         </SignedIn>
       </div>
 

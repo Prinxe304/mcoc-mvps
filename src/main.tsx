@@ -9,18 +9,25 @@ import App from "./App";
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 const convexUrl = import.meta.env.VITE_CONVEX_URL as string | undefined;
 
-if (!clerkPublishableKey || !convexUrl) {
-  throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY or VITE_CONVEX_URL in environment variables.");
-}
-
-const convex = new ConvexReactClient(convexUrl);
+const missing = [
+  !clerkPublishableKey ? "VITE_CLERK_PUBLISHABLE_KEY" : null,
+  !convexUrl ? "VITE_CONVEX_URL" : null,
+].filter(Boolean) as string[];
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ClerkProvider publishableKey={clerkPublishableKey}>
-      <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
-        <App />
-      </ConvexProviderWithClerk>
-    </ClerkProvider>
+    {missing.length > 0 ? (
+      <div style={{ padding: "24px", fontFamily: "sans-serif" }}>
+        <h2>Missing environment variables</h2>
+        <p>Please add these in <code>.env.local</code> and restart <code>npm run dev</code>:</p>
+        <pre>{missing.join("\n")}</pre>
+      </div>
+    ) : (
+      <ClerkProvider publishableKey={clerkPublishableKey!}>
+        <ConvexProviderWithClerk client={new ConvexReactClient(convexUrl!)} useAuth={useAuth}>
+          <App />
+        </ConvexProviderWithClerk>
+      </ClerkProvider>
+    )}
   </StrictMode>,
 )
