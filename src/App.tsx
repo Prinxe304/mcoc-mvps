@@ -50,6 +50,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const SHARED_SYNC_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 const supabase = SHARED_SYNC_ENABLED ? createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!) : null;
+const POLL_INTERVAL_MS = 4000;
 
 const calculateKD = (kills: number, deaths: number): number => {
   if (kills === 0 && deaths === 0) return 0;
@@ -116,7 +117,7 @@ const saveCloudState = async (snapshot: PersistedState): Promise<void> => {
     },
   ];
 
-  await fetch(url, {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       ...cloudHeaders(),
@@ -124,6 +125,10 @@ const saveCloudState = async (snapshot: PersistedState): Promise<void> => {
     },
     body: JSON.stringify(payload),
   });
+
+  if (!res.ok) {
+    console.error("Failed to write shared state:", res.status, await res.text());
+  }
 };
 
 export default function App() {
@@ -269,6 +274,25 @@ export default function App() {
     return () => {
       void supabase.removeChannel(channel);
     };
+  }, [isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated || !SHARED_SYNC_ENABLED) return;
+
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const remote = await fetchCloudState();
+          if (!remote) return;
+          if (remote.updatedAt <= latestUpdatedAtRef.current) return;
+          applySnapshot(remote);
+        } catch {
+          // Ignore polling failures.
+        }
+      })();
+    }, POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
   }, [isHydrated]);
 
   const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
