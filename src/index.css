@@ -27,6 +27,14 @@ body {
   color: #1f2937;
 }
 
+.sync-note {
+  margin: -8px auto 14px;
+  width: min(860px, calc(100vw - 28px));
+  color: #64748b;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
 .tabs-wrap {
   display: flex;
   justify-content: center;

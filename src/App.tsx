@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
@@ -34,9 +34,21 @@ interface PersistedState {
   history: string[][];
   activeBG: BG;
   submittedMvps: SubmittedMvp[];
+  updatedAt: number;
+}
+
+interface CloudStateRow {
+  room_id: string;
+  state: PersistedState;
+  updated_at: string;
 }
 
 const STORAGE_KEY = "war-mvp-dashboard-state-v1";
+const ROOM_ID = "global";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const SHARED_SYNC_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const POLL_INTERVAL_MS = 8000;
 
 const calculateKD = (kills: number, deaths: number): number => {
   if (kills === 0 && deaths === 0) return 0;
@@ -54,34 +66,126 @@ const createInitialData = (existingNames: Data | null = null): Data => {
   }, {} as Data);
 };
 
+const cloudHeaders = (): HeadersInit => ({
+  apikey: SUPABASE_ANON_KEY ?? "",
+  Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ""}`,
+  "Content-Type": "application/json",
+});
+
+const fetchCloudState = async (): Promise<PersistedState | null> => {
+  if (!SHARED_SYNC_ENABLED) return null;
+
+  const url = `${SUPABASE_URL}/rest/v1/war_mvp_state?room_id=eq.${encodeURIComponent(ROOM_ID)}&select=state,updated_at&limit=1`;
+  const res = await fetch(url, { headers: cloudHeaders() });
+  if (!res.ok) return null;
+
+  const rows = (await res.json()) as Array<Pick<CloudStateRow, "state" | "updated_at">>;
+  if (rows.length === 0) return null;
+
+  const row = rows[0];
+  if (!row?.state) return null;
+
+  return {
+    ...row.state,
+    updatedAt: Number(row.state.updatedAt || Date.parse(row.updated_at) || 0),
+  };
+};
+
+const saveCloudState = async (snapshot: PersistedState): Promise<void> => {
+  if (!SHARED_SYNC_ENABLED) return;
+
+  const url = `${SUPABASE_URL}/rest/v1/war_mvp_state`;
+  const payload = [
+    {
+      room_id: ROOM_ID,
+      state: snapshot,
+      updated_at: new Date(snapshot.updatedAt).toISOString(),
+    },
+  ];
+
+  await fetch(url, {
+    method: "POST",
+    headers: {
+      ...cloudHeaders(),
+      Prefer: "resolution=merge-duplicates",
+    },
+    body: JSON.stringify(payload),
+  });
+};
+
 export default function App() {
   const [showLeaderboard, setShowLeaderboard] = useState(true);
   const [data, setData] = useState<Data>(createInitialData());
   const [history, setHistory] = useState<string[][]>([]);
   const [activeBG, setActiveBG] = useState<BG>("BG1");
   const [submittedMvps, setSubmittedMvps] = useState<SubmittedMvp[]>([]);
-  const [isLoadedFromStorage, setIsLoadedFromStorage] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  const skipPersistOnceRef = useRef(false);
+  const latestUpdatedAtRef = useRef(0);
+  const cloudSaveTimerRef = useRef<number | null>(null);
+
+  const applySnapshot = (snapshot: PersistedState) => {
+    skipPersistOnceRef.current = true;
+    latestUpdatedAtRef.current = snapshot.updatedAt || 0;
+
+    setShowLeaderboard(snapshot.showLeaderboard);
+    setData(snapshot.data);
+    setHistory(snapshot.history);
+    setActiveBG(snapshot.activeBG);
+    setSubmittedMvps(snapshot.submittedMvps);
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+  };
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<PersistedState>;
+    const boot = async () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Partial<PersistedState>;
+          const localSnapshot: PersistedState = {
+            showLeaderboard: typeof parsed.showLeaderboard === "boolean" ? parsed.showLeaderboard : true,
+            data: (parsed.data as Data) || createInitialData(),
+            history: Array.isArray(parsed.history) ? parsed.history : [],
+            activeBG: parsed.activeBG && BG_NAMES.includes(parsed.activeBG as BG) ? (parsed.activeBG as BG) : "BG1",
+            submittedMvps: Array.isArray(parsed.submittedMvps) ? parsed.submittedMvps : [],
+            updatedAt: Number(parsed.updatedAt || 0),
+          };
+          applySnapshot(localSnapshot);
+        }
+      } catch {
+        // Ignore invalid local state.
+      }
 
-      if (typeof parsed.showLeaderboard === "boolean") setShowLeaderboard(parsed.showLeaderboard);
-      if (parsed.data) setData(parsed.data as Data);
-      if (Array.isArray(parsed.history)) setHistory(parsed.history);
-      if (parsed.activeBG && BG_NAMES.includes(parsed.activeBG as BG)) setActiveBG(parsed.activeBG as BG);
-      if (Array.isArray(parsed.submittedMvps)) setSubmittedMvps(parsed.submittedMvps as SubmittedMvp[]);
-    } catch {
-      // Ignore bad local data and continue with defaults.
-    } finally {
-      setIsLoadedFromStorage(true);
-    }
+      if (SHARED_SYNC_ENABLED) {
+        try {
+          const remote = await fetchCloudState();
+          if (remote && remote.updatedAt > latestUpdatedAtRef.current) {
+            applySnapshot(remote);
+          }
+        } catch {
+          // Ignore remote read failure.
+        }
+      }
+
+      setIsHydrated(true);
+    };
+
+    void boot();
+
+    return () => {
+      if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
-    if (!isLoadedFromStorage) return;
+    if (!isHydrated) return;
+
+    if (skipPersistOnceRef.current) {
+      skipPersistOnceRef.current = false;
+      return;
+    }
 
     const snapshot: PersistedState = {
       showLeaderboard,
@@ -89,9 +193,38 @@ export default function App() {
       history,
       activeBG,
       submittedMvps,
+      updatedAt: Date.now(),
     };
+
+    latestUpdatedAtRef.current = snapshot.updatedAt;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-  }, [isLoadedFromStorage, showLeaderboard, data, history, activeBG, submittedMvps]);
+
+    if (SHARED_SYNC_ENABLED) {
+      if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
+      cloudSaveTimerRef.current = window.setTimeout(() => {
+        void saveCloudState(snapshot);
+      }, 700);
+    }
+  }, [isHydrated, showLeaderboard, data, history, activeBG, submittedMvps]);
+
+  useEffect(() => {
+    if (!isHydrated || !SHARED_SYNC_ENABLED) return;
+
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const remote = await fetchCloudState();
+          if (!remote) return;
+          if (remote.updatedAt <= latestUpdatedAtRef.current) return;
+          applySnapshot(remote);
+        } catch {
+          // Ignore polling failures.
+        }
+      })();
+    }, POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [isHydrated]);
 
   const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
     setData((prev) => {
@@ -152,11 +285,26 @@ export default function App() {
 
   const clearSavedData = () => {
     localStorage.removeItem(STORAGE_KEY);
-    setShowLeaderboard(true);
-    setData(createInitialData());
-    setHistory([]);
-    setActiveBG("BG1");
-    setSubmittedMvps([]);
+
+    const resetSnapshot: PersistedState = {
+      showLeaderboard: true,
+      data: createInitialData(),
+      history: [],
+      activeBG: "BG1",
+      submittedMvps: [],
+      updatedAt: Date.now(),
+    };
+
+    latestUpdatedAtRef.current = resetSnapshot.updatedAt;
+    setShowLeaderboard(resetSnapshot.showLeaderboard);
+    setData(resetSnapshot.data);
+    setHistory(resetSnapshot.history);
+    setActiveBG(resetSnapshot.activeBG);
+    setSubmittedMvps(resetSnapshot.submittedMvps);
+
+    if (SHARED_SYNC_ENABLED) {
+      void saveCloudState(resetSnapshot);
+    }
   };
 
   const seasonLeaderboard = useMemo(() => {
@@ -175,6 +323,10 @@ export default function App() {
   return (
     <div className="app-shell">
       <h1 className="app-title">⚔ War MVP Dashboard</h1>
+
+      {!SHARED_SYNC_ENABLED && (
+        <p className="sync-note">Shared sync is off. Add Supabase env vars to share with friends.</p>
+      )}
 
       <div className="tabs-wrap">
         {BG_NAMES.map((bg) => (
