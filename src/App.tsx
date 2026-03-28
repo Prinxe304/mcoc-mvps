@@ -29,7 +29,7 @@ interface BGResult {
 type Data = Record<BG, Player[]>;
 type BGResults = Record<BG, BGResult>;
 type SubmittedMvp = { bg: BG; name: string; kd: number };
-type SeasonTracker = Record<string, { kills: number; deaths: number; wars: number }>;
+type SeasonTracker = Record<string, { name: string; kills: number; deaths: number; wars: number; kdSum: number }>;
 type BonusCounts = Record<BG, number>;
 
 interface PersistedState {
@@ -78,14 +78,12 @@ const WAR_FORTUNES = [
 
 const calculateKD = (kills: number, deaths: number): number => {
   if (kills === 0 && deaths === 0) return 0;
-  return kills / (deaths === 0 ? 1 : deaths);
+  return kills / (deaths + 1);
 };
 
-const calculateSeasonKD = (kills: number, deaths: number, wars: number): number => {
-  if (kills === 0 && deaths === 0) return 0;
+const calculateSeasonKD = (kdSum: number, wars: number): number => {
   if (wars <= 0) return 0;
-  if (deaths === 0) return kills / wars;
-  return kills / deaths;
+  return kdSum / wars;
 };
 
 const emptyBonusCounts = (): BonusCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
@@ -325,13 +323,17 @@ export default function App() {
       const next: SeasonTracker = { ...prev };
       BG_NAMES.forEach((bg) => {
         data[bg].forEach((player) => {
-          const name = player.name.trim();
-          if (!name) return;
-          const current = next[name] || { kills: 0, deaths: 0, wars: 0 };
-          next[name] = {
+          const rawName = player.name.trim();
+          if (!rawName) return;
+          const key = rawName.toLowerCase();
+          const current = next[key] || { name: rawName, kills: 0, deaths: 0, wars: 0, kdSum: 0 };
+          const warKd = calculateKD(Number(player.kills || 0), Number(player.deaths || 0));
+          next[key] = {
+            name: current.name || rawName,
             kills: current.kills + Number(player.kills || 0),
             deaths: current.deaths + Number(player.deaths || 0),
             wars: current.wars + 1,
+            kdSum: current.kdSum + warKd,
           };
         });
       });
@@ -368,13 +370,21 @@ export default function App() {
   const activeMVP = bgResults[activeBG]?.mvp;
   const seasonKdTable = useMemo(() => {
     return Object.entries(seasonTracker)
-      .map(([name, stats]) => ({
-        name,
-        kills: stats.kills,
-        deaths: stats.deaths,
-        wars: stats.wars,
-        kd: calculateSeasonKD(stats.kills, stats.deaths, stats.wars),
-      }))
+      .map(([key, stats]) => {
+        const kills = Number((stats as any).kills || 0);
+        const deaths = Number((stats as any).deaths || 0);
+        const wars = Number((stats as any).wars || 0);
+        const kdSumFallback = calculateKD(kills, deaths) * Math.max(wars, 1);
+        const kdSum = Number((stats as any).kdSum ?? kdSumFallback);
+        const name = ((stats as any).name as string | undefined)?.trim() || key;
+        return {
+          name,
+          kills,
+          deaths,
+          wars,
+          kd: calculateSeasonKD(kdSum, wars),
+        };
+      })
       .sort((a, b) => b.kd - a.kd);
   }, [seasonTracker]);
 
