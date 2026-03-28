@@ -66,18 +66,30 @@ const createInitialData = (existingNames: Data | null = null): Data => {
   }, {} as Data);
 };
 
-const cloudHeaders = (): HeadersInit => ({
-  apikey: SUPABASE_ANON_KEY ?? "",
-  Authorization: `Bearer ${SUPABASE_ANON_KEY ?? ""}`,
-  "Content-Type": "application/json",
-});
+const cloudHeaders = (): HeadersInit => {
+  const key = SUPABASE_ANON_KEY ?? "";
+  const headers: Record<string, string> = {
+    apikey: key,
+    "Content-Type": "application/json",
+  };
+
+  // Legacy anon key is JWT; publishable keys (sb_publishable_...) are not.
+  if (key.split(".").length === 3) {
+    headers.Authorization = `Bearer ${key}`;
+  }
+
+  return headers;
+};
 
 const fetchCloudState = async (): Promise<PersistedState | null> => {
   if (!SHARED_SYNC_ENABLED) return null;
 
   const url = `${SUPABASE_URL}/rest/v1/war_mvp_state?room_id=eq.${encodeURIComponent(ROOM_ID)}&select=state,updated_at&limit=1`;
   const res = await fetch(url, { headers: cloudHeaders() });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    console.error("Failed to read shared state:", res.status, await res.text());
+    return null;
+  }
 
   const rows = (await res.json()) as Array<Pick<CloudStateRow, "state" | "updated_at">>;
   if (rows.length === 0) return null;
@@ -94,7 +106,7 @@ const fetchCloudState = async (): Promise<PersistedState | null> => {
 const saveCloudState = async (snapshot: PersistedState): Promise<void> => {
   if (!SHARED_SYNC_ENABLED) return;
 
-  const url = `${SUPABASE_URL}/rest/v1/war_mvp_state`;
+  const url = `${SUPABASE_URL}/rest/v1/war_mvp_state?on_conflict=room_id`;
   const payload = [
     {
       room_id: ROOM_ID,
@@ -107,7 +119,7 @@ const saveCloudState = async (snapshot: PersistedState): Promise<void> => {
     method: "POST",
     headers: {
       ...cloudHeaders(),
-      Prefer: "resolution=merge-duplicates",
+      Prefer: "resolution=merge-duplicates,return=representation",
     },
     body: JSON.stringify(payload),
   });
