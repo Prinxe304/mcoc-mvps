@@ -136,6 +136,7 @@ export default function App() {
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
   const cloudSaveTimerRef = useRef<number | null>(null);
+  const hasAppliedCloudStateRef = useRef(false);
 
   const applySnapshot = (snapshot: PersistedState) => {
     skipPersistOnceRef.current = true;
@@ -176,6 +177,7 @@ export default function App() {
           // On initial app load, always prefer shared cloud state if it exists.
           // This avoids stale/local snapshots blocking cross-device sync.
           if (remote) {
+            hasAppliedCloudStateRef.current = true;
             applySnapshot(remote);
           }
         } catch {
@@ -229,6 +231,11 @@ export default function App() {
         try {
           const remote = await fetchCloudState();
           if (!remote) return;
+          if (!hasAppliedCloudStateRef.current) {
+            hasAppliedCloudStateRef.current = true;
+            applySnapshot(remote);
+            return;
+          }
           if (remote.updatedAt <= latestUpdatedAtRef.current) return;
           applySnapshot(remote);
         } catch {
