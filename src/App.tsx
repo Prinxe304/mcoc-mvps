@@ -92,18 +92,24 @@ export default function App() {
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
   const cloudSaveTimerRef = useRef<number | null>(null);
+  const hasResolvedRemoteStateRef = useRef(false);
 
   const applySnapshot = (snapshot: PersistedState) => {
     skipPersistOnceRef.current = true;
     latestUpdatedAtRef.current = snapshot.updatedAt || 0;
 
-    setShowLeaderboard(snapshot.showLeaderboard);
     setData(snapshot.data);
     setHistory(snapshot.history);
-    setActiveBG(snapshot.activeBG);
     setSubmittedMvps(snapshot.submittedMvps);
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        ...snapshot,
+        showLeaderboard,
+        activeBG,
+      } satisfies PersistedState),
+    );
   };
 
   useEffect(() => {
@@ -112,7 +118,11 @@ export default function App() {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<PersistedState>;
         const localSnapshot = normalizeSnapshot(parsed);
-        if (localSnapshot) applySnapshot(localSnapshot);
+        if (localSnapshot) {
+          setShowLeaderboard(localSnapshot.showLeaderboard);
+          setActiveBG(localSnapshot.activeBG);
+          applySnapshot(localSnapshot);
+        }
       }
     } catch {
       // Ignore invalid local state.
@@ -126,7 +136,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isHydrated || !isSignedIn || !remoteState) return;
+    if (!isHydrated || !isSignedIn) return;
+    if (remoteState === undefined) return;
+
+    hasResolvedRemoteStateRef.current = true;
+    if (!remoteState) return;
 
     const snapshot = normalizeSnapshot(remoteState as Partial<PersistedState>);
     if (!snapshot) return;
@@ -137,6 +151,9 @@ export default function App() {
 
   useEffect(() => {
     if (!isHydrated) return;
+    if (!isSignedIn) {
+      hasResolvedRemoteStateRef.current = false;
+    }
 
     if (skipPersistOnceRef.current) {
       skipPersistOnceRef.current = false;
@@ -155,7 +172,7 @@ export default function App() {
     latestUpdatedAtRef.current = snapshot.updatedAt;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 
-    if (isSignedIn) {
+    if (isSignedIn && hasResolvedRemoteStateRef.current) {
       if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
       cloudSaveTimerRef.current = window.setTimeout(() => {
         void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
