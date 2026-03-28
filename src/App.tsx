@@ -1,7 +1,6 @@
+import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
+import { useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getApp, getApps, initializeApp } from "firebase/app";
-import { get, getDatabase, onValue, ref as dbRef, set } from "firebase/database";
-import { createClient } from "@supabase/supabase-js";
 import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
@@ -40,40 +39,11 @@ interface PersistedState {
   updatedAt: number;
 }
 
-interface CloudStateRow {
-  room_id: string;
-  state: PersistedState;
-  updated_at: string;
-}
-
 const STORAGE_KEY = "war-mvp-dashboard-state-v1";
 const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global";
-const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY as string | undefined;
-const FIREBASE_AUTH_DOMAIN = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined;
-const FIREBASE_DATABASE_URL = import.meta.env.VITE_FIREBASE_DATABASE_URL as string | undefined;
-const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined;
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-const FIREBASE_ENABLED = Boolean(
-  FIREBASE_API_KEY && FIREBASE_AUTH_DOMAIN && FIREBASE_DATABASE_URL && FIREBASE_PROJECT_ID,
-);
-const SUPABASE_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
-const SHARED_SYNC_ENABLED = FIREBASE_ENABLED || SUPABASE_ENABLED;
-const SYNC_PROVIDER = FIREBASE_ENABLED ? "firebase" : SUPABASE_ENABLED ? "supabase" : "none";
-const supabase = SUPABASE_ENABLED ? createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!) : null;
-const firebaseApp = FIREBASE_ENABLED
-  ? getApps().length
-    ? getApp()
-    : initializeApp({
-        apiKey: FIREBASE_API_KEY,
-        authDomain: FIREBASE_AUTH_DOMAIN,
-        databaseURL: FIREBASE_DATABASE_URL,
-        projectId: FIREBASE_PROJECT_ID,
-      })
-  : null;
-const firebaseDb = firebaseApp ? getDatabase(firebaseApp) : null;
-const POLL_INTERVAL_MS = 4000;
+const getStateRef = "state:getState" as any;
+const saveStateRef = "state:saveState" as any;
 
 const calculateKD = (kills: number, deaths: number): number => {
   if (kills === 0 && deaths === 0) return 0;
@@ -91,22 +61,10 @@ const createInitialData = (existingNames: Data | null = null): Data => {
   }, {} as Data);
 };
 
-const cloudHeaders = (): HeadersInit => {
-  const key = SUPABASE_ANON_KEY ?? "";
-  const headers: Record<string, string> = {
-    apikey: key,
-    "Content-Type": "application/json",
-  };
-
-  // Legacy anon key is JWT; publishable keys (sb_publishable_...) are not.
-  if (key.split(".").length === 3) {
-    headers.Authorization = `Bearer ${key}`;
-  }
-
-  return headers;
-};
-
-const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, fallbackUpdatedAt = 0): PersistedState | null => {
+const normalizeSnapshot = (
+  parsed: Partial<PersistedState> | null | undefined,
+  fallbackUpdatedAt = 0,
+): PersistedState | null => {
   if (!parsed) return null;
   return {
     showLeaderboard: typeof parsed.showLeaderboard === "boolean" ? parsed.showLeaderboard : true,
@@ -118,63 +76,9 @@ const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, f
   };
 };
 
-const fetchCloudState = async (): Promise<PersistedState | null> => {
-  if (!SHARED_SYNC_ENABLED) return null;
-
-  if (FIREBASE_ENABLED && firebaseDb) {
-    const snapshot = await get(dbRef(firebaseDb, `war_mvp_state/${ROOM_ID}`));
-    if (!snapshot.exists()) return null;
-    return normalizeSnapshot(snapshot.val() as Partial<PersistedState>);
-  }
-
-  const url = `${SUPABASE_URL}/rest/v1/war_mvp_state?room_id=eq.${encodeURIComponent(ROOM_ID)}&select=state,updated_at&limit=1`;
-  const res = await fetch(url, { headers: cloudHeaders() });
-  if (!res.ok) {
-    console.error("Failed to read shared state:", res.status, await res.text());
-    return null;
-  }
-
-  const rows = (await res.json()) as Array<Pick<CloudStateRow, "state" | "updated_at">>;
-  if (rows.length === 0) return null;
-
-  const row = rows[0];
-  if (!row?.state) return null;
-
-  return normalizeSnapshot(row.state, Date.parse(row.updated_at));
-};
-
-const saveCloudState = async (snapshot: PersistedState): Promise<void> => {
-  if (!SHARED_SYNC_ENABLED) return;
-
-  if (FIREBASE_ENABLED && firebaseDb) {
-    await set(dbRef(firebaseDb, `war_mvp_state/${ROOM_ID}`), snapshot);
-    return;
-  }
-
-  const url = `${SUPABASE_URL}/rest/v1/war_mvp_state?on_conflict=room_id`;
-  const payload = [
-    {
-      room_id: ROOM_ID,
-      state: snapshot,
-      updated_at: new Date(snapshot.updatedAt).toISOString(),
-    },
-  ];
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      ...cloudHeaders(),
-      Prefer: "resolution=merge-duplicates,return=representation",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    console.error("Failed to write shared state:", res.status, await res.text());
-  }
-};
-
 export default function App() {
+  const { isLoaded: isAuthLoaded, isSignedIn } = useAuth();
+
   const [showLeaderboard, setShowLeaderboard] = useState(true);
   const [data, setData] = useState<Data>(createInitialData());
   const [history, setHistory] = useState<string[][]>([]);
@@ -182,14 +86,14 @@ export default function App() {
   const [submittedMvps, setSubmittedMvps] = useState<SubmittedMvp[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
 
+  const saveCloudState = useMutation(saveStateRef);
+  const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
+
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
   const cloudSaveTimerRef = useRef<number | null>(null);
-  const hasAppliedCloudStateRef = useRef(false);
-  const isApplyingRemoteRef = useRef(false);
 
   const applySnapshot = (snapshot: PersistedState) => {
-    isApplyingRemoteRef.current = true;
     skipPersistOnceRef.current = true;
     latestUpdatedAtRef.current = snapshot.updatedAt || 0;
 
@@ -200,48 +104,36 @@ export default function App() {
     setSubmittedMvps(snapshot.submittedMvps);
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-
-    window.setTimeout(() => {
-      isApplyingRemoteRef.current = false;
-    }, 0);
   };
 
   useEffect(() => {
-    const boot = async () => {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as Partial<PersistedState>;
-          const localSnapshot = normalizeSnapshot(parsed);
-          if (localSnapshot) applySnapshot(localSnapshot);
-        }
-      } catch {
-        // Ignore invalid local state.
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<PersistedState>;
+        const localSnapshot = normalizeSnapshot(parsed);
+        if (localSnapshot) applySnapshot(localSnapshot);
       }
+    } catch {
+      // Ignore invalid local state.
+    }
 
-      if (SHARED_SYNC_ENABLED) {
-        try {
-          const remote = await fetchCloudState();
-          // On initial app load, always prefer shared cloud state if it exists.
-          // This avoids stale/local snapshots blocking cross-device sync.
-          if (remote) {
-            hasAppliedCloudStateRef.current = true;
-            applySnapshot(remote);
-          }
-        } catch {
-          // Ignore remote read failure.
-        }
-      }
-
-      setIsHydrated(true);
-    };
-
-    void boot();
+    setIsHydrated(true);
 
     return () => {
       if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isHydrated || !isSignedIn || !remoteState) return;
+
+    const snapshot = normalizeSnapshot(remoteState as Partial<PersistedState>);
+    if (!snapshot) return;
+    if (snapshot.updatedAt <= latestUpdatedAtRef.current) return;
+
+    applySnapshot(snapshot);
+  }, [isHydrated, isSignedIn, remoteState]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -263,91 +155,13 @@ export default function App() {
     latestUpdatedAtRef.current = snapshot.updatedAt;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 
-    if (SHARED_SYNC_ENABLED) {
+    if (isSignedIn) {
       if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
       cloudSaveTimerRef.current = window.setTimeout(() => {
-        void saveCloudState(snapshot);
-      }, 700);
+        void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
+      }, 500);
     }
-  }, [isHydrated, showLeaderboard, data, history, activeBG, submittedMvps]);
-
-  useEffect(() => {
-    if (!isHydrated || !SHARED_SYNC_ENABLED) return;
-
-    if (FIREBASE_ENABLED && firebaseDb) {
-      const unsubscribe = onValue(dbRef(firebaseDb, `war_mvp_state/${ROOM_ID}`), (snapshot) => {
-        const next = normalizeSnapshot(snapshot.val() as Partial<PersistedState> | null | undefined);
-        if (!next) return;
-        if (isApplyingRemoteRef.current) return;
-
-        if (!hasAppliedCloudStateRef.current) {
-          hasAppliedCloudStateRef.current = true;
-          applySnapshot(next);
-          return;
-        }
-
-        if (next.updatedAt <= latestUpdatedAtRef.current) return;
-        applySnapshot(next);
-      });
-
-      return () => {
-        unsubscribe();
-      };
-    }
-
-    if (!supabase) return;
-
-    const channel = supabase
-      .channel(`war-mvp-state-${ROOM_ID}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "war_mvp_state",
-          filter: `room_id=eq.${ROOM_ID}`,
-        },
-        (payload) => {
-          const row = payload.new as Partial<CloudStateRow> | undefined;
-          const next = normalizeSnapshot(row?.state, Date.parse((row?.updated_at as string) || ""));
-          if (!next) return;
-          if (isApplyingRemoteRef.current) return;
-
-          if (!hasAppliedCloudStateRef.current) {
-            hasAppliedCloudStateRef.current = true;
-            applySnapshot(next);
-            return;
-          }
-
-          if (next.updatedAt <= latestUpdatedAtRef.current) return;
-          applySnapshot(next);
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [isHydrated]);
-
-  useEffect(() => {
-    if (!isHydrated || !SUPABASE_ENABLED) return;
-
-    const timer = window.setInterval(() => {
-      void (async () => {
-        try {
-          const remote = await fetchCloudState();
-          if (!remote) return;
-          if (remote.updatedAt <= latestUpdatedAtRef.current) return;
-          applySnapshot(remote);
-        } catch {
-          // Ignore polling failures.
-        }
-      })();
-    }, POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(timer);
-  }, [isHydrated]);
+  }, [isHydrated, isSignedIn, showLeaderboard, data, history, activeBG, submittedMvps, saveCloudState]);
 
   const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
     setData((prev) => {
@@ -425,8 +239,8 @@ export default function App() {
     setActiveBG(resetSnapshot.activeBG);
     setSubmittedMvps(resetSnapshot.submittedMvps);
 
-    if (SHARED_SYNC_ENABLED) {
-      void saveCloudState(resetSnapshot);
+    if (isSignedIn) {
+      void saveCloudState({ roomId: ROOM_ID, state: resetSnapshot, updatedAt: resetSnapshot.updatedAt });
     }
   };
 
@@ -443,133 +257,153 @@ export default function App() {
 
   const activeMVP = bgResults[activeBG]?.mvp;
 
+  if (!isAuthLoaded) {
+    return <div className="app-shell">Loading authentication...</div>;
+  }
+
   return (
     <div className="app-shell">
-      <h1 className="app-title">⚔ War MVP Dashboard</h1>
-
-      {!SHARED_SYNC_ENABLED && (
-        <p className="sync-note">Shared sync is off. Add Firebase or Supabase env vars to share with friends.</p>
-      )}
-      {SHARED_SYNC_ENABLED && (
-        <p className="sync-note">Sync mode: {SYNC_PROVIDER === "firebase" ? "Firebase Realtime" : "Supabase"}</p>
-      )}
-
-      <div className="tabs-wrap">
-        {BG_NAMES.map((bg) => (
-          <Button
-            key={bg}
-            type="button"
-            onClick={() => setActiveBG(bg)}
-            className={`tab-btn ${activeBG === bg ? "is-active" : ""}`}
-          >
-            {bg}
-          </Button>
-        ))}
+      <div className="action-row" style={{ justifyContent: "space-between" }}>
+        <h1 className="app-title">⚔ War MVP Dashboard</h1>
+        <SignedIn>
+          <UserButton />
+        </SignedIn>
       </div>
 
-      <Card className="card-main">
-        <CardContent className="card-main-content">
-          <h2 className="section-title">{activeBG}</h2>
-          <div className="table-head">
-            <div>Player</div>
-            <div>Kills</div>
-            <div>Deaths</div>
-            <div>KD</div>
-          </div>
+      <SignedOut>
+        <Card className="card-main">
+          <CardContent className="card-main-content">
+            <h2 className="section-title">Sign in required</h2>
+            <p className="sync-note">Please sign in to use shared real-time sync across devices.</p>
+            <SignInButton mode="modal">
+              <Button type="button" className="btn-primary">
+                Sign In
+              </Button>
+            </SignInButton>
+          </CardContent>
+        </Card>
+      </SignedOut>
 
-          {data[activeBG].map((player, i) => {
-            const kd = calculateKD(player.kills, player.deaths);
-            const isMVP = activeMVP?.name === player.name;
+      <SignedIn>
+        <p className="sync-note">Sync mode: Convex realtime (room: {ROOM_ID})</p>
 
-            return (
-              <div key={`${activeBG}-${i}`} className={`player-row ${isMVP ? "is-mvp" : ""}`}>
-                <Input
-                  className="input-player"
-                  value={player.name}
-                  onChange={(e) => updatePlayer(activeBG, i, "name", e.target.value)}
-                />
-                <Input
-                  type="number"
-                  className="input-num"
-                  value={player.kills === 0 ? "" : player.kills}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) =>
-                    updatePlayer(activeBG, i, "kills", e.target.value === "" ? 0 : Number(e.target.value))
-                  }
-                />
-                <Input
-                  type="number"
-                  className="input-num"
-                  value={player.deaths === 0 ? "" : player.deaths}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) =>
-                    updatePlayer(activeBG, i, "deaths", e.target.value === "" ? 0 : Number(e.target.value))
-                  }
-                />
-                <div className="kd-cell">{kd.toFixed(2)}</div>
-              </div>
-            );
-          })}
+        <div className="tabs-wrap">
+          {BG_NAMES.map((bg) => (
+            <Button
+              key={bg}
+              type="button"
+              onClick={() => setActiveBG(bg)}
+              className={`tab-btn ${activeBG === bg ? "is-active" : ""}`}
+            >
+              {bg}
+            </Button>
+          ))}
+        </div>
 
-          <div className="mvp-line">
-            MVP: <span className="mvp-name">{activeMVP ? activeMVP.name : "-"}</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="action-row">
-        <Button type="button" className="btn-primary" onClick={submitWar}>
-          Submit War
-        </Button>
-        <Button type="button" className="btn-secondary" onClick={resetWar}>
-          Next War
-        </Button>
-        <Button type="button" className="btn-danger" onClick={clearSavedData}>
-          Clear Saved Data
-        </Button>
-      </div>
-
-      {submittedMvps.length > 0 && (
-        <Card className="card-secondary card-leaderboard">
-          <CardContent className="card-secondary-content">
-            <div className="leaderboard-head" onClick={() => setShowLeaderboard((prev) => !prev)}>
-              <h2 className="section-title-left">Season Leaderboard</h2>
-              <span className="chevron">{showLeaderboard ? "▲" : "▼"}</span>
+        <Card className="card-main">
+          <CardContent className="card-main-content">
+            <h2 className="section-title">{activeBG}</h2>
+            <div className="table-head">
+              <div>Player</div>
+              <div>Kills</div>
+              <div>Deaths</div>
+              <div>KD</div>
             </div>
-            {showLeaderboard && (
-              <div className="leaderboard-list">
-                {seasonLeaderboard.map((p, i) => (
-                  <div key={p[0]} className={`leader-row ${i === 0 ? "leader-top" : ""}`}>
-                    <span>
-                      {i + 1}. {p[0]}
-                    </span>
-                    <span>{p[1]} MVPs</span>
+
+            {data[activeBG].map((player, i) => {
+              const kd = calculateKD(player.kills, player.deaths);
+              const isMVP = activeMVP?.name === player.name;
+
+              return (
+                <div key={`${activeBG}-${i}`} className={`player-row ${isMVP ? "is-mvp" : ""}`}>
+                  <Input
+                    className="input-player"
+                    value={player.name}
+                    onChange={(e) => updatePlayer(activeBG, i, "name", e.target.value)}
+                  />
+                  <Input
+                    type="number"
+                    className="input-num"
+                    value={player.kills === 0 ? "" : player.kills}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) =>
+                      updatePlayer(activeBG, i, "kills", e.target.value === "" ? 0 : Number(e.target.value))
+                    }
+                  />
+                  <Input
+                    type="number"
+                    className="input-num"
+                    value={player.deaths === 0 ? "" : player.deaths}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) =>
+                      updatePlayer(activeBG, i, "deaths", e.target.value === "" ? 0 : Number(e.target.value))
+                    }
+                  />
+                  <div className="kd-cell">{kd.toFixed(2)}</div>
+                </div>
+              );
+            })}
+
+            <div className="mvp-line">
+              MVP: <span className="mvp-name">{activeMVP ? activeMVP.name : "-"}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="action-row">
+          <Button type="button" className="btn-primary" onClick={submitWar}>
+            Submit War
+          </Button>
+          <Button type="button" className="btn-secondary" onClick={resetWar}>
+            Next War
+          </Button>
+          <Button type="button" className="btn-danger" onClick={clearSavedData}>
+            Clear Saved Data
+          </Button>
+        </div>
+
+        {submittedMvps.length > 0 && (
+          <Card className="card-secondary card-leaderboard">
+            <CardContent className="card-secondary-content">
+              <div className="leaderboard-head" onClick={() => setShowLeaderboard((prev) => !prev)}>
+                <h2 className="section-title-left">Season Leaderboard</h2>
+                <span className="chevron">{showLeaderboard ? "▲" : "▼"}</span>
+              </div>
+              {showLeaderboard && (
+                <div className="leaderboard-list">
+                  {seasonLeaderboard.map((p, i) => (
+                    <div key={p[0]} className={`leader-row ${i === 0 ? "leader-top" : ""}`}>
+                      <span>
+                        {i + 1}. {p[0]}
+                      </span>
+                      <span>{p[1]} MVPs</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className="card-secondary card-history">
+          <CardContent className="card-secondary-content">
+            <h2 className="section-title-left">War History</h2>
+            {history.map((war, i) => (
+              <div key={`war-${i}`} className="history-card">
+                <div className="history-head">
+                  <span className="history-war">War {i + 1}</span>
+                  <span className="history-meta">{war.length} MVPs</span>
+                </div>
+                {war.map((player, idx) => (
+                  <div key={`${i}-${idx}-${player}`} className="history-item">
+                    {idx + 1}. {player}
                   </div>
                 ))}
               </div>
-            )}
+            ))}
           </CardContent>
         </Card>
-      )}
-
-      <Card className="card-secondary card-history">
-        <CardContent className="card-secondary-content">
-          <h2 className="section-title-left">War History</h2>
-          {history.map((war, i) => (
-            <div key={`war-${i}`} className="history-card">
-              <div className="history-head">
-                <span className="history-war">War {i + 1}</span>
-                <span className="history-meta">{war.length} MVPs</span>
-              </div>
-              {war.map((player, idx) => (
-                <div key={`${i}-${idx}-${player}`} className="history-item">
-                  {idx + 1}. {player}
-                </div>
-              ))}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      </SignedIn>
     </div>
   );
 }
