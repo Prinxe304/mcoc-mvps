@@ -200,6 +200,32 @@ body {
   font-weight: 700;
 }
 
+.bonus-line {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f7f9fc;
+  border: 1px solid #d6deea;
+  border-radius: 10px;
+}
+
+.bonus-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #5b6778;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.bonus-input {
+  width: 100%;
+  height: 38px;
+  border: 1px solid #cdd5e0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1e293b;
+  padding: 0 10px;
+}
+
 .action-row {
   display: flex;
   justify-content: center;
@@ -250,6 +276,8 @@ body {
 
 .card-awards {
   padding: 16px;
+  position: relative;
+  overflow: hidden;
 }
 
 .card-leaderboard,
@@ -407,6 +435,118 @@ body {
   font-weight: 600;
 }
 
+.kd-toggle-wrap {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.kd-toggle-btn {
+  min-width: 150px;
+}
+
+.track-section {
+  margin-top: 14px;
+  border-top: 1px solid #dbe3ee;
+  padding-top: 12px;
+}
+
+.track-title {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  color: #334155;
+  font-weight: 700;
+}
+
+.badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.streak-badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  color: #0f4aa6;
+  font-weight: 700;
+  background: #eaf2ff;
+  border: 1px solid #93c5fd;
+}
+
+.meme-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.fortune-card {
+  margin-top: 10px;
+  border: 1px solid #cfd8e6;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #1e3a5f;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.rival-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rival-select {
+  height: 38px;
+  border: 1px solid #cdd5e0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1e293b;
+  padding: 0 10px;
+}
+
+.rival-result {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #334155;
+  font-weight: 600;
+}
+
+.rival-winner {
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.confetti-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.confetti-bit {
+  position: absolute;
+  top: -10px;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #2563eb, #fb7185);
+  opacity: 0.85;
+  animation: confetti-fall 2s ease-in forwards;
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-14px) rotate(0deg);
+  }
+  100% {
+    transform: translateY(380px) rotate(360deg);
+    opacity: 0;
+  }
+}
+
 @media (max-width: 760px) {
   .app-shell {
     padding: 10px 8px 20px;
@@ -480,5 +620,9 @@ body {
 
   .award-gif {
     height: 120px;
+  }
+
+  .rival-row {
+    grid-template-columns: 1fr;
   }
 }
