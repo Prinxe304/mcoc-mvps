@@ -29,6 +29,7 @@ interface BGResult {
 type Data = Record<BG, Player[]>;
 type BGResults = Record<BG, BGResult>;
 type SubmittedMvp = { bg: BG; name: string; kd: number };
+type SeasonTracker = Record<string, { kills: number; deaths: number; wars: number }>;
 
 interface PersistedState {
   showLeaderboard: boolean;
@@ -36,6 +37,7 @@ interface PersistedState {
   history: string[][];
   activeBG: BG;
   submittedMvps: SubmittedMvp[];
+  seasonTracker: SeasonTracker;
   updatedAt: number;
 }
 
@@ -44,10 +46,19 @@ const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global"
 
 const getStateRef = "state:getState" as any;
 const saveStateRef = "state:saveState" as any;
+const GOD_GIF_URL = "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif";
+const LOSER_GIF_URL = "https://media.giphy.com/media/9Y5BbDSkSTiY8/giphy.gif";
 
 const calculateKD = (kills: number, deaths: number): number => {
   if (kills === 0 && deaths === 0) return 0;
   return kills / (deaths === 0 ? 1 : deaths);
+};
+
+const calculateSeasonKD = (kills: number, deaths: number, wars: number): number => {
+  if (kills === 0 && deaths === 0) return 0;
+  if (wars <= 0) return 0;
+  if (deaths === 0) return kills / wars;
+  return kills / deaths;
 };
 
 const createInitialData = (existingNames: Data | null = null): Data => {
@@ -72,6 +83,8 @@ const normalizeSnapshot = (
     history: Array.isArray(parsed.history) ? parsed.history : [],
     activeBG: parsed.activeBG && BG_NAMES.includes(parsed.activeBG as BG) ? (parsed.activeBG as BG) : "BG1",
     submittedMvps: Array.isArray(parsed.submittedMvps) ? parsed.submittedMvps : [],
+    seasonTracker:
+      parsed.seasonTracker && typeof parsed.seasonTracker === "object" ? (parsed.seasonTracker as SeasonTracker) : {},
     updatedAt: Number(parsed.updatedAt || fallbackUpdatedAt || 0),
   };
 };
@@ -84,6 +97,7 @@ export default function App() {
   const [history, setHistory] = useState<string[][]>([]);
   const [activeBG, setActiveBG] = useState<BG>("BG1");
   const [submittedMvps, setSubmittedMvps] = useState<SubmittedMvp[]>([]);
+  const [seasonTracker, setSeasonTracker] = useState<SeasonTracker>({});
   const [isHydrated, setIsHydrated] = useState(false);
 
   const saveCloudState = useMutation(saveStateRef);
@@ -101,6 +115,7 @@ export default function App() {
     setData(snapshot.data);
     setHistory(snapshot.history);
     setSubmittedMvps(snapshot.submittedMvps);
+    setSeasonTracker(snapshot.seasonTracker || {});
 
     localStorage.setItem(
       STORAGE_KEY,
@@ -166,6 +181,7 @@ export default function App() {
       history,
       activeBG,
       submittedMvps,
+      seasonTracker,
       updatedAt: Date.now(),
     };
 
@@ -178,7 +194,7 @@ export default function App() {
         void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
       }, 500);
     }
-  }, [isHydrated, isSignedIn, showLeaderboard, data, history, activeBG, submittedMvps, saveCloudState]);
+  }, [isHydrated, isSignedIn, showLeaderboard, data, history, activeBG, submittedMvps, seasonTracker, saveCloudState]);
 
   const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
     setData((prev) => {
@@ -230,6 +246,26 @@ export default function App() {
 
     setSubmittedMvps(mvps);
     setHistory((prev) => [...prev, mvps.map((m) => m.name)]);
+
+    setSeasonTracker((prev) => {
+      const next: SeasonTracker = { ...prev };
+
+      BG_NAMES.forEach((bg) => {
+        data[bg].forEach((player) => {
+          const name = player.name.trim();
+          if (!name) return;
+
+          const current = next[name] || { kills: 0, deaths: 0, wars: 0 };
+          next[name] = {
+            kills: current.kills + Number(player.kills || 0),
+            deaths: current.deaths + Number(player.deaths || 0),
+            wars: current.wars + 1,
+          };
+        });
+      });
+
+      return next;
+    });
   };
 
   const resetWar = () => {
@@ -246,6 +282,7 @@ export default function App() {
       history: [],
       activeBG: "BG1",
       submittedMvps: [],
+      seasonTracker: {},
       updatedAt: Date.now(),
     };
 
@@ -255,6 +292,7 @@ export default function App() {
     setHistory(resetSnapshot.history);
     setActiveBG(resetSnapshot.activeBG);
     setSubmittedMvps(resetSnapshot.submittedMvps);
+    setSeasonTracker(resetSnapshot.seasonTracker);
 
     if (isSignedIn) {
       void saveCloudState({ roomId: ROOM_ID, state: resetSnapshot, updatedAt: resetSnapshot.updatedAt });
@@ -273,6 +311,19 @@ export default function App() {
   }, [history]);
 
   const activeMVP = bgResults[activeBG]?.mvp;
+  const seasonKdTable = useMemo(() => {
+    return Object.entries(seasonTracker)
+      .map(([name, stats]) => ({
+        name,
+        kills: stats.kills,
+        deaths: stats.deaths,
+        wars: stats.wars,
+        kd: calculateSeasonKD(stats.kills, stats.deaths, stats.wars),
+      }))
+      .sort((a, b) => b.kd - a.kd);
+  }, [seasonTracker]);
+  const godOfBg = seasonKdTable[0] ?? null;
+  const loserBracket = seasonKdTable.length > 1 ? seasonKdTable[seasonKdTable.length - 1] : null;
 
   if (!isAuthLoaded) {
     return <div className="app-shell">Loading authentication...</div>;
@@ -380,6 +431,40 @@ export default function App() {
             Clear Saved Data
           </Button>
         </div>
+
+        {seasonKdTable.length > 0 && (
+          <Card className="card-secondary card-awards">
+            <CardContent className="card-secondary-content">
+              <h2 className="section-title-left">KD Awards (from first war)</h2>
+              <div className="award-grid">
+                <div className="award-item god-item">
+                  <img src={GOD_GIF_URL} alt="God of BG gif" className="award-gif" />
+                  <div className="award-label">God of BG</div>
+                  <div className="award-name">{godOfBg ? godOfBg.name : "-"}</div>
+                  <div className="award-meta">KD {godOfBg ? godOfBg.kd.toFixed(2) : "0.00"}</div>
+                </div>
+
+                <div className="award-item loser-item">
+                  <img src={LOSER_GIF_URL} alt="Loser bracket gif" className="award-gif" />
+                  <div className="award-label">Loser Bracket</div>
+                  <div className="award-name">{loserBracket ? loserBracket.name : "-"}</div>
+                  <div className="award-meta">KD {loserBracket ? loserBracket.kd.toFixed(2) : "0.00"}</div>
+                </div>
+              </div>
+
+              <div className="kd-track-list">
+                {seasonKdTable.slice(0, 12).map((row, i) => (
+                  <div key={row.name} className="kd-track-row">
+                    <span>
+                      {i + 1}. {row.name}
+                    </span>
+                    <span>KD {row.kd.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {submittedMvps.length > 0 && (
           <Card className="card-secondary card-leaderboard">

@@ -248,6 +248,10 @@ body {
   padding: 14px;
 }
 
+.card-awards {
+  padding: 16px;
+}
+
 .card-leaderboard,
 .card-history {
   padding: 20px;
@@ -330,6 +334,79 @@ body {
   font-size: 0.88rem;
 }
 
+.award-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.award-item {
+  background: #eef2f7;
+  border: 1px solid #d3dce8;
+  border-radius: 12px;
+  padding: 10px;
+  text-align: center;
+}
+
+.god-item {
+  border-color: #93c5fd;
+  background: #eaf2ff;
+}
+
+.loser-item {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.award-gif {
+  width: 100%;
+  height: 130px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #d6dde8;
+}
+
+.award-label {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.award-name {
+  margin-top: 3px;
+  font-size: 1rem;
+  color: #1f2937;
+  font-weight: 800;
+}
+
+.award-meta {
+  margin-top: 2px;
+  font-size: 0.84rem;
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.kd-track-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.kd-track-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #d9e1eb;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  color: #334155;
+  font-weight: 600;
+}
+
 @media (max-width: 760px) {
   .app-shell {
     padding: 10px 8px 20px;
@@ -395,5 +472,13 @@ body {
 
   .kd-cell {
     font-size: 0.8rem;
+  }
+
+  .award-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .award-gif {
+    height: 120px;
   }
 }
