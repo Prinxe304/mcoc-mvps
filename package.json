@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
     "@fontsource-variable/geist": "^5.2.8",
     "@shadcn/ui": "^0.0.4",
     "class-variance-authority": "^0.7.1",

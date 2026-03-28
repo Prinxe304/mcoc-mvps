@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
@@ -44,11 +45,11 @@ interface CloudStateRow {
 }
 
 const STORAGE_KEY = "war-mvp-dashboard-state-v1";
-const ROOM_ID = "global";
+const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const SHARED_SYNC_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
-const POLL_INTERVAL_MS = 8000;
+const supabase = SHARED_SYNC_ENABLED ? createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!) : null;
 
 const calculateKD = (kills: number, deaths: number): number => {
   if (kills === 0 && deaths === 0) return 0;
@@ -137,8 +138,10 @@ export default function App() {
   const latestUpdatedAtRef = useRef(0);
   const cloudSaveTimerRef = useRef<number | null>(null);
   const hasAppliedCloudStateRef = useRef(false);
+  const isApplyingRemoteRef = useRef(false);
 
   const applySnapshot = (snapshot: PersistedState) => {
+    isApplyingRemoteRef.current = true;
     skipPersistOnceRef.current = true;
     latestUpdatedAtRef.current = snapshot.updatedAt || 0;
 
@@ -149,6 +152,10 @@ export default function App() {
     setSubmittedMvps(snapshot.submittedMvps);
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+
+    window.setTimeout(() => {
+      isApplyingRemoteRef.current = false;
+    }, 0);
   };
 
   useEffect(() => {
@@ -224,27 +231,44 @@ export default function App() {
   }, [isHydrated, showLeaderboard, data, history, activeBG, submittedMvps]);
 
   useEffect(() => {
-    if (!isHydrated || !SHARED_SYNC_ENABLED) return;
+    if (!isHydrated || !SHARED_SYNC_ENABLED || !supabase) return;
 
-    const timer = window.setInterval(() => {
-      void (async () => {
-        try {
-          const remote = await fetchCloudState();
-          if (!remote) return;
+    const channel = supabase
+      .channel(`war-mvp-state-${ROOM_ID}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "war_mvp_state",
+          filter: `room_id=eq.${ROOM_ID}`,
+        },
+        (payload) => {
+          const row = payload.new as Partial<CloudStateRow> | undefined;
+          const next = row?.state;
+          if (!next) return;
+          if (isApplyingRemoteRef.current) return;
+
+          const normalized: PersistedState = {
+            ...next,
+            updatedAt: Number(next.updatedAt || Date.parse((row?.updated_at as string) || "") || 0),
+          };
+
           if (!hasAppliedCloudStateRef.current) {
             hasAppliedCloudStateRef.current = true;
-            applySnapshot(remote);
+            applySnapshot(normalized);
             return;
           }
-          if (remote.updatedAt <= latestUpdatedAtRef.current) return;
-          applySnapshot(remote);
-        } catch {
-          // Ignore polling failures.
-        }
-      })();
-    }, POLL_INTERVAL_MS);
 
-    return () => window.clearInterval(timer);
+          if (normalized.updatedAt <= latestUpdatedAtRef.current) return;
+          applySnapshot(normalized);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
   }, [isHydrated]);
 
   const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
