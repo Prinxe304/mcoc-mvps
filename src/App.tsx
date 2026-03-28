@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getApp, getApps, initializeApp } from "firebase/app";
+import { get, getDatabase, onValue, ref as dbRef, set } from "firebase/database";
 import { createClient } from "@supabase/supabase-js";
 import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
@@ -46,10 +48,31 @@ interface CloudStateRow {
 
 const STORAGE_KEY = "war-mvp-dashboard-state-v1";
 const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global";
+const FIREBASE_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY as string | undefined;
+const FIREBASE_AUTH_DOMAIN = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined;
+const FIREBASE_DATABASE_URL = import.meta.env.VITE_FIREBASE_DATABASE_URL as string | undefined;
+const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined;
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-const SHARED_SYNC_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
-const supabase = SHARED_SYNC_ENABLED ? createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!) : null;
+
+const FIREBASE_ENABLED = Boolean(
+  FIREBASE_API_KEY && FIREBASE_AUTH_DOMAIN && FIREBASE_DATABASE_URL && FIREBASE_PROJECT_ID,
+);
+const SUPABASE_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const SHARED_SYNC_ENABLED = FIREBASE_ENABLED || SUPABASE_ENABLED;
+const SYNC_PROVIDER = FIREBASE_ENABLED ? "firebase" : SUPABASE_ENABLED ? "supabase" : "none";
+const supabase = SUPABASE_ENABLED ? createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!) : null;
+const firebaseApp = FIREBASE_ENABLED
+  ? getApps().length
+    ? getApp()
+    : initializeApp({
+        apiKey: FIREBASE_API_KEY,
+        authDomain: FIREBASE_AUTH_DOMAIN,
+        databaseURL: FIREBASE_DATABASE_URL,
+        projectId: FIREBASE_PROJECT_ID,
+      })
+  : null;
+const firebaseDb = firebaseApp ? getDatabase(firebaseApp) : null;
 const POLL_INTERVAL_MS = 4000;
 
 const calculateKD = (kills: number, deaths: number): number => {
@@ -83,8 +106,26 @@ const cloudHeaders = (): HeadersInit => {
   return headers;
 };
 
+const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, fallbackUpdatedAt = 0): PersistedState | null => {
+  if (!parsed) return null;
+  return {
+    showLeaderboard: typeof parsed.showLeaderboard === "boolean" ? parsed.showLeaderboard : true,
+    data: (parsed.data as Data) || createInitialData(),
+    history: Array.isArray(parsed.history) ? parsed.history : [],
+    activeBG: parsed.activeBG && BG_NAMES.includes(parsed.activeBG as BG) ? (parsed.activeBG as BG) : "BG1",
+    submittedMvps: Array.isArray(parsed.submittedMvps) ? parsed.submittedMvps : [],
+    updatedAt: Number(parsed.updatedAt || fallbackUpdatedAt || 0),
+  };
+};
+
 const fetchCloudState = async (): Promise<PersistedState | null> => {
   if (!SHARED_SYNC_ENABLED) return null;
+
+  if (FIREBASE_ENABLED && firebaseDb) {
+    const snapshot = await get(dbRef(firebaseDb, `war_mvp_state/${ROOM_ID}`));
+    if (!snapshot.exists()) return null;
+    return normalizeSnapshot(snapshot.val() as Partial<PersistedState>);
+  }
 
   const url = `${SUPABASE_URL}/rest/v1/war_mvp_state?room_id=eq.${encodeURIComponent(ROOM_ID)}&select=state,updated_at&limit=1`;
   const res = await fetch(url, { headers: cloudHeaders() });
@@ -99,14 +140,16 @@ const fetchCloudState = async (): Promise<PersistedState | null> => {
   const row = rows[0];
   if (!row?.state) return null;
 
-  return {
-    ...row.state,
-    updatedAt: Number(row.state.updatedAt || Date.parse(row.updated_at) || 0),
-  };
+  return normalizeSnapshot(row.state, Date.parse(row.updated_at));
 };
 
 const saveCloudState = async (snapshot: PersistedState): Promise<void> => {
   if (!SHARED_SYNC_ENABLED) return;
+
+  if (FIREBASE_ENABLED && firebaseDb) {
+    await set(dbRef(firebaseDb, `war_mvp_state/${ROOM_ID}`), snapshot);
+    return;
+  }
 
   const url = `${SUPABASE_URL}/rest/v1/war_mvp_state?on_conflict=room_id`;
   const payload = [
@@ -169,15 +212,8 @@ export default function App() {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw) as Partial<PersistedState>;
-          const localSnapshot: PersistedState = {
-            showLeaderboard: typeof parsed.showLeaderboard === "boolean" ? parsed.showLeaderboard : true,
-            data: (parsed.data as Data) || createInitialData(),
-            history: Array.isArray(parsed.history) ? parsed.history : [],
-            activeBG: parsed.activeBG && BG_NAMES.includes(parsed.activeBG as BG) ? (parsed.activeBG as BG) : "BG1",
-            submittedMvps: Array.isArray(parsed.submittedMvps) ? parsed.submittedMvps : [],
-            updatedAt: Number(parsed.updatedAt || 0),
-          };
-          applySnapshot(localSnapshot);
+          const localSnapshot = normalizeSnapshot(parsed);
+          if (localSnapshot) applySnapshot(localSnapshot);
         }
       } catch {
         // Ignore invalid local state.
@@ -236,7 +272,30 @@ export default function App() {
   }, [isHydrated, showLeaderboard, data, history, activeBG, submittedMvps]);
 
   useEffect(() => {
-    if (!isHydrated || !SHARED_SYNC_ENABLED || !supabase) return;
+    if (!isHydrated || !SHARED_SYNC_ENABLED) return;
+
+    if (FIREBASE_ENABLED && firebaseDb) {
+      const unsubscribe = onValue(dbRef(firebaseDb, `war_mvp_state/${ROOM_ID}`), (snapshot) => {
+        const next = normalizeSnapshot(snapshot.val() as Partial<PersistedState> | null | undefined);
+        if (!next) return;
+        if (isApplyingRemoteRef.current) return;
+
+        if (!hasAppliedCloudStateRef.current) {
+          hasAppliedCloudStateRef.current = true;
+          applySnapshot(next);
+          return;
+        }
+
+        if (next.updatedAt <= latestUpdatedAtRef.current) return;
+        applySnapshot(next);
+      });
+
+      return () => {
+        unsubscribe();
+      };
+    }
+
+    if (!supabase) return;
 
     const channel = supabase
       .channel(`war-mvp-state-${ROOM_ID}`)
@@ -250,23 +309,18 @@ export default function App() {
         },
         (payload) => {
           const row = payload.new as Partial<CloudStateRow> | undefined;
-          const next = row?.state;
+          const next = normalizeSnapshot(row?.state, Date.parse((row?.updated_at as string) || ""));
           if (!next) return;
           if (isApplyingRemoteRef.current) return;
 
-          const normalized: PersistedState = {
-            ...next,
-            updatedAt: Number(next.updatedAt || Date.parse((row?.updated_at as string) || "") || 0),
-          };
-
           if (!hasAppliedCloudStateRef.current) {
             hasAppliedCloudStateRef.current = true;
-            applySnapshot(normalized);
+            applySnapshot(next);
             return;
           }
 
-          if (normalized.updatedAt <= latestUpdatedAtRef.current) return;
-          applySnapshot(normalized);
+          if (next.updatedAt <= latestUpdatedAtRef.current) return;
+          applySnapshot(next);
         },
       )
       .subscribe();
@@ -277,7 +331,7 @@ export default function App() {
   }, [isHydrated]);
 
   useEffect(() => {
-    if (!isHydrated || !SHARED_SYNC_ENABLED) return;
+    if (!isHydrated || !SUPABASE_ENABLED) return;
 
     const timer = window.setInterval(() => {
       void (async () => {
@@ -394,7 +448,10 @@ export default function App() {
       <h1 className="app-title">⚔ War MVP Dashboard</h1>
 
       {!SHARED_SYNC_ENABLED && (
-        <p className="sync-note">Shared sync is off. Add Supabase env vars to share with friends.</p>
+        <p className="sync-note">Shared sync is off. Add Firebase or Supabase env vars to share with friends.</p>
+      )}
+      {SHARED_SYNC_ENABLED && (
+        <p className="sync-note">Sync mode: {SYNC_PROVIDER === "firebase" ? "Firebase Realtime" : "Supabase"}</p>
       )}
 
       <div className="tabs-wrap">
