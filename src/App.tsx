@@ -173,7 +173,9 @@ export default function App() {
       if (SHARED_SYNC_ENABLED) {
         try {
           const remote = await fetchCloudState();
-          if (remote && remote.updatedAt > latestUpdatedAtRef.current) {
+          // On initial app load, always prefer shared cloud state if it exists.
+          // This avoids stale/local snapshots blocking cross-device sync.
+          if (remote) {
             applySnapshot(remote);
           }
         } catch {
