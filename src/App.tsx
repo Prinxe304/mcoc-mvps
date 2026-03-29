@@ -49,6 +49,8 @@ const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global"
 
 const getStateRef = "state:getState" as any;
 const saveStateRef = "state:saveState" as any;
+const updatePlayerRef = "state:updatePlayer" as any;
+const updateBonusDraftRef = "state:updateBonusDraft" as any;
 const GOD_GIF_URLS = [
   "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
   "https://media.giphy.com/media/l3q2XhfQ8oCkm1Ts4/giphy.gif",
@@ -165,12 +167,12 @@ export default function App() {
   const [isHydrated, setIsHydrated] = useState(false);
 
   const saveCloudState = useMutation(saveStateRef);
+  const updatePlayerCloud = useMutation(updatePlayerRef);
+  const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
   const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
 
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
-  const cloudSaveTimerRef = useRef<number | null>(null);
-  const hasResolvedRemoteStateRef = useRef(false);
   const previousGodRef = useRef<string>("");
 
   const playFx = (kind: "submit" | "god" | "fun") => {
@@ -224,9 +226,7 @@ export default function App() {
 
     setIsHydrated(true);
 
-    return () => {
-      if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
-    };
+    return () => {};
   }, []);
 
   useEffect(() => {
@@ -244,7 +244,6 @@ export default function App() {
     if (!isHydrated || !isSignedIn) return;
     if (remoteState === undefined) return;
 
-    hasResolvedRemoteStateRef.current = true;
     if (!remoteState) return;
 
     const snapshot = normalizeSnapshot(remoteState as Partial<PersistedState>);
@@ -255,7 +254,6 @@ export default function App() {
 
   useEffect(() => {
     if (!isHydrated) return;
-    if (!isSignedIn) hasResolvedRemoteStateRef.current = false;
 
     if (skipPersistOnceRef.current) {
       skipPersistOnceRef.current = false;
@@ -274,14 +272,7 @@ export default function App() {
 
     latestUpdatedAtRef.current = snapshot.updatedAt;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-
-    if (isSignedIn && hasResolvedRemoteStateRef.current) {
-      if (cloudSaveTimerRef.current) window.clearTimeout(cloudSaveTimerRef.current);
-      cloudSaveTimerRef.current = window.setTimeout(() => {
-        void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
-      }, 500);
-    }
-  }, [isHydrated, isSignedIn, data, history, submittedMvps, seasonTracker, bonusDraft, bonusHistory, saveCloudState]);
+  }, [isHydrated, data, history, submittedMvps, seasonTracker, bonusDraft, bonusHistory]);
 
   useEffect(() => {
     try {
@@ -292,25 +283,37 @@ export default function App() {
   }, [activeBG]);
 
   const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
+    const current = data[bg]?.[index] ?? { name: `${bg}-Player${index + 1}`, kills: 0, deaths: 0, updatedAt: 0 };
+    const updatedAt = Date.now();
+    const nextPlayer: Player = {
+      ...current,
+      [field]: field === "name" ? String(value) : Number(value),
+      updatedAt,
+    };
+
     setData((prev) => {
       const newData = { ...prev };
       newData[bg] = newData[bg].map((player, i) => {
         if (i !== index) return player;
-        return {
-          ...player,
-          [field]: field === "name" ? value : Number(value),
-          updatedAt: Date.now(),
-        };
+        return nextPlayer;
       });
       return newData;
     });
+
+    if (isSignedIn) {
+      void updatePlayerCloud({ roomId: ROOM_ID, bg, index, player: nextPlayer });
+    }
   };
 
   const updateBonusCount = (bg: BG, value: string) => {
+    const parsed = value === "" ? 0 : Number(value);
     setBonusDraft((prev) => ({
       ...prev,
-      [bg]: value === "" ? 0 : Number(value),
+      [bg]: parsed,
     }));
+    if (isSignedIn) {
+      void updateBonusDraftCloud({ roomId: ROOM_ID, bg, value: parsed });
+    }
   };
 
   const bgResults = useMemo<BGResults>(() => {
@@ -333,40 +336,71 @@ export default function App() {
       return { bg, name: mvp ? mvp.name : "", kd: mvp ? mvp.kd : 0 };
     }).sort((a, b) => b.kd - a.kd);
 
-    setSubmittedMvps(mvps);
-    setHistory((prev) => [...prev, mvps.map((m) => m.name)]);
-
-    setBonusHistory((prev) => [...prev, normalizeBonusCounts(bonusDraft)]);
-    setBonusDraft(emptyBonusCounts());
+    const nextSubmittedMvps = mvps;
+    const nextHistory = [...history, mvps.map((m) => m.name)];
+    const nextBonusHistory = [...bonusHistory, normalizeBonusCounts(bonusDraft)];
+    const nextBonusDraft = emptyBonusCounts();
+    const nextSeasonTracker: SeasonTracker = { ...seasonTracker };
 
     playFx("submit");
 
-    setSeasonTracker((prev) => {
-      const next: SeasonTracker = { ...prev };
-      BG_NAMES.forEach((bg) => {
-        data[bg].forEach((player) => {
-          const rawName = player.name.trim();
-          if (!rawName) return;
-          const key = rawName.toLowerCase();
-          const current = next[key] || { name: rawName, kills: 0, deaths: 0, wars: 0, kdSum: 0 };
-          const warKd = calculateKD(Number(player.kills || 0), Number(player.deaths || 0));
-          next[key] = {
-            name: current.name || rawName,
-            kills: current.kills + Number(player.kills || 0),
-            deaths: current.deaths + Number(player.deaths || 0),
-            wars: current.wars + 1,
-            kdSum: current.kdSum + warKd,
-          };
-        });
+    BG_NAMES.forEach((bg) => {
+      data[bg].forEach((player) => {
+        const rawName = player.name.trim();
+        if (!rawName) return;
+        const key = rawName.toLowerCase();
+        const current = nextSeasonTracker[key] || { name: rawName, kills: 0, deaths: 0, wars: 0, kdSum: 0 };
+        const warKd = calculateKD(Number(player.kills || 0), Number(player.deaths || 0));
+        nextSeasonTracker[key] = {
+          name: current.name || rawName,
+          kills: current.kills + Number(player.kills || 0),
+          deaths: current.deaths + Number(player.deaths || 0),
+          wars: current.wars + 1,
+          kdSum: current.kdSum + warKd,
+        };
       });
-      return next;
     });
+
+    setSubmittedMvps(nextSubmittedMvps);
+    setHistory(nextHistory);
+    setBonusHistory(nextBonusHistory);
+    setBonusDraft(nextBonusDraft);
+    setSeasonTracker(nextSeasonTracker);
+
+    if (isSignedIn) {
+      const snapshot: PersistedState = {
+        data,
+        history: nextHistory,
+        submittedMvps: nextSubmittedMvps,
+        seasonTracker: nextSeasonTracker,
+        bonusDraft: nextBonusDraft,
+        bonusHistory: nextBonusHistory,
+        updatedAt: Date.now(),
+      };
+      void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
+    }
   };
 
   const resetWar = () => {
-    setData(createInitialData(data));
-    setSubmittedMvps([]);
-    setBonusDraft(emptyBonusCounts());
+    const nextData = createInitialData(data);
+    const nextSubmittedMvps: SubmittedMvp[] = [];
+    const nextBonusDraft = emptyBonusCounts();
+    setData(nextData);
+    setSubmittedMvps(nextSubmittedMvps);
+    setBonusDraft(nextBonusDraft);
+
+    if (isSignedIn) {
+      const snapshot: PersistedState = {
+        data: nextData,
+        history,
+        submittedMvps: nextSubmittedMvps,
+        seasonTracker,
+        bonusDraft: nextBonusDraft,
+        bonusHistory,
+        updatedAt: Date.now(),
+      };
+      void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
+    }
   };
 
   const clearSavedData = () => {

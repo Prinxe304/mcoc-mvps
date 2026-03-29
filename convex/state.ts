@@ -111,6 +111,31 @@ const mergeState = (existingState: any, incomingState: any) => {
   };
 };
 
+const createInitialState = () => {
+  const data: Record<string, unknown[]> = {};
+  BG_NAMES.forEach((bg) => {
+    data[bg] = Array.from({ length: PLAYERS_PER_BG }).map((_, i) => ({
+      name: `${bg}-Player${i + 1}`,
+      kills: 0,
+      deaths: 0,
+      updatedAt: 0,
+    }));
+  });
+  return {
+    data,
+    history: [],
+    submittedMvps: [],
+    seasonTracker: {},
+    bonusDraft: { BG1: 0, BG2: 0, BG3: 0 },
+    bonusHistory: [],
+    updatedAt: 0,
+  };
+};
+
+const normalizeState = (state: any) => {
+  return mergeState(createInitialState(), state);
+};
+
 export const getState = query({
   args: { roomId: v.string() },
   handler: async (ctx, args) => {
@@ -150,6 +175,104 @@ export const saveState = mutation({
       roomId: args.roomId,
       state: args.state,
       updatedAt: args.updatedAt,
+      updatedBy: identity?.subject ?? "anonymous",
+    });
+  },
+});
+
+export const updatePlayer = mutation({
+  args: {
+    roomId: v.string(),
+    bg: v.union(v.literal("BG1"), v.literal("BG2"), v.literal("BG3")),
+    index: v.number(),
+    player: v.object({
+      name: v.string(),
+      kills: v.number(),
+      deaths: v.number(),
+      updatedAt: v.number(),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const existing = await ctx.db
+      .query("warStates")
+      .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
+      .unique();
+
+    const baseState = normalizeState(existing?.state ?? null);
+    const rows = Array.isArray(baseState.data?.[args.bg]) ? [...baseState.data[args.bg]] : [];
+    const rowCount = Math.max(rows.length, PLAYERS_PER_BG, args.index + 1);
+    const nextRows = Array.from({ length: rowCount }).map((_, i) =>
+      normalizePlayer(rows[i], `${args.bg}-Player${i + 1}`),
+    );
+    const current = nextRows[args.index] || normalizePlayer(null, `${args.bg}-Player${args.index + 1}`);
+    if (args.player.updatedAt >= Number(current.updatedAt || 0)) {
+      nextRows[args.index] = normalizePlayer(args.player, current.name || `${args.bg}-Player${args.index + 1}`);
+    }
+
+    const nextState = {
+      ...baseState,
+      data: {
+        ...baseState.data,
+        [args.bg]: nextRows,
+      },
+      updatedAt: Math.max(Number(baseState.updatedAt || 0), Number(args.player.updatedAt || 0), Date.now()),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        state: nextState,
+        updatedAt: nextState.updatedAt,
+        updatedBy: identity?.subject ?? "anonymous",
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("warStates", {
+      roomId: args.roomId,
+      state: nextState,
+      updatedAt: nextState.updatedAt,
+      updatedBy: identity?.subject ?? "anonymous",
+    });
+  },
+});
+
+export const updateBonusDraft = mutation({
+  args: {
+    roomId: v.string(),
+    bg: v.union(v.literal("BG1"), v.literal("BG2"), v.literal("BG3")),
+    value: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const existing = await ctx.db
+      .query("warStates")
+      .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
+      .unique();
+
+    const baseState = normalizeState(existing?.state ?? null);
+    const nextState = {
+      ...baseState,
+      bonusDraft: {
+        ...(baseState.bonusDraft || { BG1: 0, BG2: 0, BG3: 0 }),
+        [args.bg]: Number(args.value || 0),
+      },
+      updatedAt: Math.max(Number(baseState.updatedAt || 0), Date.now()),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        state: nextState,
+        updatedAt: nextState.updatedAt,
+        updatedBy: identity?.subject ?? "anonymous",
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("warStates", {
+      roomId: args.roomId,
+      state: nextState,
+      updatedAt: nextState.updatedAt,
       updatedBy: identity?.subject ?? "anonymous",
     });
   },
