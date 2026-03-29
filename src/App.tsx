@@ -51,6 +51,7 @@ const getStateRef = "state:getState" as any;
 const saveStateRef = "state:saveState" as any;
 const updatePlayerRef = "state:updatePlayer" as any;
 const updateBonusDraftRef = "state:updateBonusDraft" as any;
+const resetStateRef = "state:resetState" as any;
 const GOD_GIF_URLS = [
   "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
   "https://media.giphy.com/media/l3q2XhfQ8oCkm1Ts4/giphy.gif",
@@ -169,11 +170,13 @@ export default function App() {
   const saveCloudState = useMutation(saveStateRef);
   const updatePlayerCloud = useMutation(updatePlayerRef);
   const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
+  const resetCloudState = useMutation(resetStateRef);
   const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
 
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
   const previousGodRef = useRef<string>("");
+  const hasAppliedRemoteOnceRef = useRef(false);
 
   const playFx = (kind: "submit" | "god" | "fun") => {
     try {
@@ -248,9 +251,21 @@ export default function App() {
 
     const snapshot = normalizeSnapshot(remoteState as Partial<PersistedState>);
     if (!snapshot) return;
+    if (!hasAppliedRemoteOnceRef.current) {
+      hasAppliedRemoteOnceRef.current = true;
+      applySnapshot(snapshot);
+      return;
+    }
     if (snapshot.updatedAt <= latestUpdatedAtRef.current) return;
     applySnapshot(snapshot);
   }, [isHydrated, isSignedIn, remoteState]);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      hasAppliedRemoteOnceRef.current = false;
+      latestUpdatedAtRef.current = 0;
+    }
+  }, [isSignedIn]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -316,6 +331,26 @@ export default function App() {
     }
   };
 
+  const buildSnapshot = (
+    overrides: Partial<Omit<PersistedState, "updatedAt">> = {},
+  ): PersistedState => {
+    return {
+      data: overrides.data ?? data,
+      history: overrides.history ?? history,
+      submittedMvps: overrides.submittedMvps ?? submittedMvps,
+      seasonTracker: overrides.seasonTracker ?? seasonTracker,
+      bonusDraft: overrides.bonusDraft ?? bonusDraft,
+      bonusHistory: overrides.bonusHistory ?? bonusHistory,
+      updatedAt: Date.now(),
+    };
+  };
+
+  const saveBgData = () => {
+    if (!isSignedIn) return;
+    const snapshot = buildSnapshot();
+    void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
+  };
+
   const bgResults = useMemo<BGResults>(() => {
     const results = {} as BGResults;
     BG_NAMES.forEach((bg) => {
@@ -368,15 +403,13 @@ export default function App() {
     setSeasonTracker(nextSeasonTracker);
 
     if (isSignedIn) {
-      const snapshot: PersistedState = {
-        data,
+      const snapshot = buildSnapshot({
         history: nextHistory,
         submittedMvps: nextSubmittedMvps,
         seasonTracker: nextSeasonTracker,
         bonusDraft: nextBonusDraft,
         bonusHistory: nextBonusHistory,
-        updatedAt: Date.now(),
-      };
+      });
       void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
     }
   };
@@ -390,15 +423,11 @@ export default function App() {
     setBonusDraft(nextBonusDraft);
 
     if (isSignedIn) {
-      const snapshot: PersistedState = {
+      const snapshot = buildSnapshot({
         data: nextData,
-        history,
         submittedMvps: nextSubmittedMvps,
-        seasonTracker,
         bonusDraft: nextBonusDraft,
-        bonusHistory,
-        updatedAt: Date.now(),
-      };
+      });
       void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
     }
   };
@@ -419,7 +448,7 @@ export default function App() {
     setActiveBG("BG1");
     localStorage.setItem(ACTIVE_BG_STORAGE_KEY, "BG1");
     if (isSignedIn) {
-      void saveCloudState({ roomId: ROOM_ID, state: resetSnapshot, updatedAt: resetSnapshot.updatedAt });
+      void resetCloudState({ roomId: ROOM_ID });
     }
   };
 
@@ -681,6 +710,9 @@ export default function App() {
             <div className="action-row">
               <Button type="button" className="btn-primary" onClick={submitWar}>
                 Submit War
+              </Button>
+              <Button type="button" className="btn-secondary" onClick={saveBgData}>
+                Save BG
               </Button>
               <Button type="button" className="btn-secondary" onClick={resetWar}>
                 Next War

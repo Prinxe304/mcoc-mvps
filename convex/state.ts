@@ -277,3 +277,36 @@ export const updateBonusDraft = mutation({
     });
   },
 });
+
+export const resetState = mutation({
+  args: { roomId: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const existing = await ctx.db
+      .query("warStates")
+      .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
+      .unique();
+
+    const base = createInitialState();
+    const nextState = {
+      ...base,
+      updatedAt: Date.now(),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        state: nextState,
+        updatedAt: nextState.updatedAt,
+        updatedBy: identity?.subject ?? "anonymous",
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("warStates", {
+      roomId: args.roomId,
+      state: nextState,
+      updatedAt: nextState.updatedAt,
+      updatedBy: identity?.subject ?? "anonymous",
+    });
+  },
+});
