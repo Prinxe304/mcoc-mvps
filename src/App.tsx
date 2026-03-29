@@ -1,4 +1,4 @@
-import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignInButton, UserButton, useAuth, useUser } from "@clerk/clerk-react";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "./components/ui/card";
@@ -49,6 +49,10 @@ interface PersistedState {
 const STORAGE_KEY = "war-mvp-dashboard-state-v1";
 const ACTIVE_BG_STORAGE_KEY = "war-mvp-active-bg-v1";
 const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global";
+const EDITOR_EMAILS = String(import.meta.env.VITE_EDITOR_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
 
 const getStateRef = "state:getState" as any;
 const saveStateRef = "state:saveState" as any;
@@ -56,7 +60,6 @@ const updatePlayerRef = "state:updatePlayer" as any;
 const updateBonusDraftRef = "state:updateBonusDraft" as any;
 const updateDefenseDraftRef = "state:updateDefenseDraft" as any;
 const resetStateRef = "state:resetState" as any;
-const getEditAccessRef = "state:getEditAccess" as any;
 const GOD_GIF_URLS = [
   "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
   "https://media.giphy.com/media/l3q2XhfQ8oCkm1Ts4/giphy.gif",
@@ -159,6 +162,7 @@ const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, f
 
 export default function App() {
   const { isLoaded: isAuthLoaded, isSignedIn } = useAuth();
+  const { user } = useUser();
 
   const [data, setData] = useState<Data>(createInitialData());
   const [history, setHistory] = useState<string[][]>([]);
@@ -185,13 +189,15 @@ export default function App() {
   const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
   const resetCloudState = useMutation(resetStateRef);
   const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
-  const editAccess = useQuery(getEditAccessRef, isSignedIn ? {} : "skip");
 
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
   const previousGodRef = useRef<string>("");
   const hasAppliedRemoteOnceRef = useRef(false);
-  const canEdit = isSignedIn ? Boolean(editAccess?.canEdit) : false;
+  const currentUserEmail = (user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || "")
+    .trim()
+    .toLowerCase();
+  const canEdit = isSignedIn ? (EDITOR_EMAILS.length === 0 ? true : EDITOR_EMAILS.includes(currentUserEmail)) : false;
 
   const playFx = (kind: "submit" | "god" | "fun") => {
     try {
@@ -673,9 +679,7 @@ export default function App() {
         <p className="sync-note">Sync mode: Convex realtime (room: {ROOM_ID})</p>
         {!canEdit && (
           <p className="sync-note">
-            View only mode. Ask admin to allow your identity:
-            {" "}
-            {(editAccess?.email || editAccess?.subject || editAccess?.tokenIdentifier || "unknown")}
+            View only mode. Ask admin to allow your email: {currentUserEmail || "unknown"}
           </p>
         )}
 

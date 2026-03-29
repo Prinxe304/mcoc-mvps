@@ -10,6 +10,9 @@ const getAllowedEditorEmails = () =>
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
 
+const shouldEnforceServerEditorCheck = () =>
+  String(process.env.ENFORCE_SERVER_EDITOR_CHECK || "").trim().toLowerCase() === "true";
+
 const getIdentityEmail = (identity: any): string | null => {
   const raw =
     identity?.email ||
@@ -54,6 +57,9 @@ const canEditByIdentity = (identity: any): boolean => {
 };
 
 const requireEditor = (identity: any) => {
+  if (!shouldEnforceServerEditorCheck()) {
+    return;
+  }
   if (!canEditByIdentity(identity)) {
     throw new Error("Forbidden: editor access required");
   }
