@@ -4,6 +4,37 @@ import { mutation, query } from "./_generated/server";
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 const PLAYERS_PER_BG = 10;
 
+const getAllowedEditorEmails = () =>
+  (process.env.EDITOR_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+
+const getIdentityEmail = (identity: any): string | null => {
+  const raw =
+    identity?.email ||
+    identity?.emailAddress ||
+    identity?.claims?.email ||
+    identity?.claims?.["email"] ||
+    identity?.tokenIdentifier;
+  if (!raw || typeof raw !== "string") return null;
+  return raw.toLowerCase();
+};
+
+const canEditByIdentity = (identity: any): boolean => {
+  const allowed = getAllowedEditorEmails();
+  if (allowed.length === 0) return true;
+  const email = getIdentityEmail(identity);
+  if (!email) return false;
+  return allowed.includes(email);
+};
+
+const requireEditor = (identity: any) => {
+  if (!canEditByIdentity(identity)) {
+    throw new Error("Forbidden: editor access required");
+  }
+};
+
 const isDefaultPlayer = (player: any, fallbackName: string) => {
   const name = typeof player?.name === "string" ? player.name.trim() : "";
   const kills = Number(player?.kills || 0);
@@ -157,6 +188,18 @@ export const getState = query({
   },
 });
 
+export const getEditAccess = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    return {
+      canEdit: canEditByIdentity(identity),
+      email: getIdentityEmail(identity),
+      hasEditorList: getAllowedEditorEmails().length > 0,
+    };
+  },
+});
+
 export const saveState = mutation({
   args: {
     roomId: v.string(),
@@ -165,6 +208,7 @@ export const saveState = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
+    requireEditor(identity);
 
     const existing = await ctx.db
       .query("warStates")
@@ -204,6 +248,7 @@ export const updatePlayer = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
+    requireEditor(identity);
     const existing = await ctx.db
       .query("warStates")
       .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
@@ -255,6 +300,7 @@ export const updateBonusDraft = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
+    requireEditor(identity);
     const existing = await ctx.db
       .query("warStates")
       .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
@@ -296,6 +342,7 @@ export const updateDefenseDraft = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
+    requireEditor(identity);
     const existing = await ctx.db
       .query("warStates")
       .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
@@ -333,6 +380,7 @@ export const resetState = mutation({
   args: { roomId: v.string() },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
+    requireEditor(identity);
     const existing = await ctx.db
       .query("warStates")
       .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))

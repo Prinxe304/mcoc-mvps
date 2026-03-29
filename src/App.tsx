@@ -56,6 +56,7 @@ const updatePlayerRef = "state:updatePlayer" as any;
 const updateBonusDraftRef = "state:updateBonusDraft" as any;
 const updateDefenseDraftRef = "state:updateDefenseDraft" as any;
 const resetStateRef = "state:resetState" as any;
+const getEditAccessRef = "state:getEditAccess" as any;
 const GOD_GIF_URLS = [
   "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
   "https://media.giphy.com/media/l3q2XhfQ8oCkm1Ts4/giphy.gif",
@@ -184,11 +185,13 @@ export default function App() {
   const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
   const resetCloudState = useMutation(resetStateRef);
   const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
+  const editAccess = useQuery(getEditAccessRef, isSignedIn ? {} : "skip");
 
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
   const previousGodRef = useRef<string>("");
   const hasAppliedRemoteOnceRef = useRef(false);
+  const canEdit = isSignedIn ? Boolean(editAccess?.canEdit) : false;
 
   const playFx = (kind: "submit" | "god" | "fun") => {
     try {
@@ -320,6 +323,7 @@ export default function App() {
   }, [activeBG]);
 
   const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
+    if (!canEdit) return;
     const current = data[bg]?.[index] ?? { name: `${bg}-Player${index + 1}`, kills: 0, deaths: 0, updatedAt: 0 };
     const updatedAt = Date.now();
     const nextPlayer: Player = {
@@ -343,13 +347,14 @@ export default function App() {
   };
 
   const syncPlayerName = (bg: BG, index: number) => {
-    if (!isSignedIn) return;
+    if (!isSignedIn || !canEdit) return;
     const player = data[bg]?.[index];
     if (!player) return;
     void updatePlayerCloud({ roomId: ROOM_ID, bg, index, player: { ...player, updatedAt: Date.now() } });
   };
 
   const updateBonusCount = (bg: BG, value: string) => {
+    if (!canEdit) return;
     const parsed = value === "" ? 0 : Number(value);
     setBonusDraft((prev) => ({
       ...prev,
@@ -361,6 +366,7 @@ export default function App() {
   };
 
   const updateDefenseCount = (bg: BG, value: string) => {
+    if (!canEdit) return;
     const parsed = value === "" ? 0 : Number(value);
     setDefenseDraft((prev) => ({
       ...prev,
@@ -388,7 +394,7 @@ export default function App() {
   };
 
   const saveBgData = () => {
-    if (!isSignedIn) return;
+    if (!isSignedIn || !canEdit) return;
     const snapshot = buildSnapshot();
     void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
   };
@@ -408,6 +414,7 @@ export default function App() {
   }, [data]);
 
   const submitWar = () => {
+    if (!canEdit) return;
     const mvps = BG_NAMES.map((bg) => {
       const mvp = bgResults[bg]?.mvp;
       return { bg, name: mvp ? mvp.name : "", kd: mvp ? mvp.kd : 0 };
@@ -463,6 +470,7 @@ export default function App() {
   };
 
   const resetWar = () => {
+    if (!canEdit) return;
     const nextData = createInitialData(data);
     const nextSubmittedMvps: SubmittedMvp[] = [];
     const nextBonusDraft = emptyBonusCounts();
@@ -484,6 +492,7 @@ export default function App() {
   };
 
   const clearSavedData = () => {
+    if (!canEdit) return;
     localStorage.removeItem(STORAGE_KEY);
     const resetSnapshot: PersistedState = {
       data: createInitialData(),
@@ -662,6 +671,9 @@ export default function App() {
 
       <SignedIn>
         <p className="sync-note">Sync mode: Convex realtime (room: {ROOM_ID})</p>
+        {!canEdit && (
+          <p className="sync-note">View only mode. Ask an admin to add your email in editor allowlist.</p>
+        )}
 
         <div className="tabs-wrap">
           {BG_NAMES.map((bg) => (
@@ -720,12 +732,14 @@ export default function App() {
                       <Input
                         className="input-player"
                         value={player.name}
+                        disabled={!canEdit}
                         onChange={(e) => updatePlayer(activeBG, i, "name", e.target.value)}
                         onBlur={() => syncPlayerName(activeBG, i)}
                       />
                       <Input
                         type="number"
                         className="input-num"
+                        disabled={!canEdit}
                         value={player.kills === 0 ? "" : player.kills}
                         onFocus={(e) => e.target.select()}
                         onChange={(e) =>
@@ -735,6 +749,7 @@ export default function App() {
                       <Input
                         type="number"
                         className="input-num"
+                        disabled={!canEdit}
                         value={player.deaths === 0 ? "" : player.deaths}
                         onFocus={(e) => e.target.select()}
                         onChange={(e) =>
@@ -758,6 +773,7 @@ export default function App() {
                           id={`bonus-${bg}`}
                           type="number"
                           className="bonus-input"
+                          disabled={!canEdit}
                           value={bonusDraft[bg] === 0 ? "" : bonusDraft[bg]}
                           onFocus={(e) => e.target.select()}
                           onChange={(e) => updateBonusCount(bg, e.target.value)}
@@ -779,6 +795,7 @@ export default function App() {
                           id={`defense-${bg}`}
                           type="number"
                           className="bonus-input"
+                          disabled={!canEdit}
                           value={defenseDraft[bg] === 0 ? "" : defenseDraft[bg]}
                           onFocus={(e) => e.target.select()}
                           onChange={(e) => updateDefenseCount(bg, e.target.value)}
@@ -791,16 +808,16 @@ export default function App() {
             </Card>
 
             <div className="action-row">
-              <Button type="button" className="btn-primary" onClick={submitWar}>
+              <Button type="button" className="btn-primary" onClick={submitWar} disabled={!canEdit}>
                 Submit War
               </Button>
-              <Button type="button" className="btn-secondary" onClick={saveBgData}>
+              <Button type="button" className="btn-secondary" onClick={saveBgData} disabled={!canEdit}>
                 Save BG
               </Button>
-              <Button type="button" className="btn-secondary" onClick={resetWar}>
+              <Button type="button" className="btn-secondary" onClick={resetWar} disabled={!canEdit}>
                 Next War
               </Button>
-              <Button type="button" className="btn-danger" onClick={clearSavedData}>
+              <Button type="button" className="btn-danger" onClick={clearSavedData} disabled={!canEdit}>
                 Clear Saved Data
               </Button>
             </div>
