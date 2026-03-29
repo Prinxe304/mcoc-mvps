@@ -270,13 +270,6 @@ export default function App() {
     if (!isSignedIn) {
       hasAppliedRemoteOnceRef.current = false;
       latestUpdatedAtRef.current = 0;
-      return;
-    }
-    // When switching to signed-in mode, discard stale local snapshot cache.
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // Ignore local storage failures.
     }
   }, [isSignedIn]);
 
