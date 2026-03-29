@@ -4,6 +4,43 @@ import { mutation, query } from "./_generated/server";
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 const PLAYERS_PER_BG = 10;
 
+const isDefaultPlayer = (player: any, fallbackName: string) => {
+  const name = typeof player?.name === "string" ? player.name.trim() : "";
+  const kills = Number(player?.kills || 0);
+  const deaths = Number(player?.deaths || 0);
+  return (name === "" || name === fallbackName) && kills === 0 && deaths === 0;
+};
+
+const hasMeaningfulData = (state: any) => {
+  if (!state || typeof state !== "object") return false;
+  const historyLen = Array.isArray(state.history) ? state.history.length : 0;
+  const bonusHistoryLen = Array.isArray(state.bonusHistory) ? state.bonusHistory.length : 0;
+  const submittedMvpsLen = Array.isArray(state.submittedMvps) ? state.submittedMvps.length : 0;
+  const seasonTrackerLen =
+    state.seasonTracker && typeof state.seasonTracker === "object" ? Object.keys(state.seasonTracker).length : 0;
+  if (historyLen > 0 || bonusHistoryLen > 0 || submittedMvpsLen > 0 || seasonTrackerLen > 0) return true;
+
+  return BG_NAMES.some((bg) => {
+    const rows = Array.isArray(state.data?.[bg]) ? state.data[bg] : [];
+    return rows.some((row: any, i: number) => !isDefaultPlayer(row, `${bg}-Player${i + 1}`));
+  });
+};
+
+const isLikelyBootstrapSnapshot = (state: any) => {
+  if (!state || typeof state !== "object") return true;
+  const historyLen = Array.isArray(state.history) ? state.history.length : 0;
+  const bonusHistoryLen = Array.isArray(state.bonusHistory) ? state.bonusHistory.length : 0;
+  const submittedMvpsLen = Array.isArray(state.submittedMvps) ? state.submittedMvps.length : 0;
+  const seasonTrackerLen =
+    state.seasonTracker && typeof state.seasonTracker === "object" ? Object.keys(state.seasonTracker).length : 0;
+  if (historyLen > 0 || bonusHistoryLen > 0 || submittedMvpsLen > 0 || seasonTrackerLen > 0) return false;
+
+  return BG_NAMES.every((bg) => {
+    const rows = Array.isArray(state.data?.[bg]) ? state.data[bg] : [];
+    return Array.from({ length: PLAYERS_PER_BG }).every((_, i) => isDefaultPlayer(rows[i], `${bg}-Player${i + 1}`));
+  });
+};
+
 const normalizePlayer = (player: any, fallbackName: string) => {
   return {
     name: typeof player?.name === "string" && player.name.trim() ? player.name : fallbackName,
@@ -23,7 +60,17 @@ const mergeData = (existingData: any, incomingData: any) => {
       const fallbackName = `${bg}-Player${i + 1}`;
       const existingPlayer = normalizePlayer(existingRows[i], fallbackName);
       const incomingPlayer = normalizePlayer(incomingRows[i], existingPlayer.name || fallbackName);
-      return incomingPlayer.updatedAt >= existingPlayer.updatedAt ? incomingPlayer : existingPlayer;
+      if (incomingPlayer.updatedAt > existingPlayer.updatedAt) {
+        if (isDefaultPlayer(incomingPlayer, fallbackName) && !isDefaultPlayer(existingPlayer, fallbackName)) {
+          return existingPlayer;
+        }
+        return incomingPlayer;
+      }
+      if (existingPlayer.updatedAt > incomingPlayer.updatedAt) return existingPlayer;
+
+      if (isDefaultPlayer(incomingPlayer, fallbackName) && !isDefaultPlayer(existingPlayer, fallbackName)) return existingPlayer;
+      if (isDefaultPlayer(existingPlayer, fallbackName) && !isDefaultPlayer(incomingPlayer, fallbackName)) return incomingPlayer;
+      return incomingPlayer;
     });
   });
   return merged;
@@ -32,6 +79,12 @@ const mergeData = (existingData: any, incomingData: any) => {
 const mergeState = (existingState: any, incomingState: any) => {
   if (!existingState) return incomingState;
   if (!incomingState) return existingState;
+  if (hasMeaningfulData(existingState) && isLikelyBootstrapSnapshot(incomingState)) {
+    return {
+      ...existingState,
+      updatedAt: Math.max(Number(existingState.updatedAt || 0), Number(incomingState.updatedAt || 0)),
+    };
+  }
 
   const existingHistory = Array.isArray(existingState.history) ? existingState.history : [];
   const incomingHistory = Array.isArray(incomingState.history) ? incomingState.history : [];
