@@ -15,10 +15,12 @@ const hasMeaningfulData = (state: any) => {
   if (!state || typeof state !== "object") return false;
   const historyLen = Array.isArray(state.history) ? state.history.length : 0;
   const bonusHistoryLen = Array.isArray(state.bonusHistory) ? state.bonusHistory.length : 0;
+  const defenseHistoryLen = Array.isArray(state.defenseHistory) ? state.defenseHistory.length : 0;
   const submittedMvpsLen = Array.isArray(state.submittedMvps) ? state.submittedMvps.length : 0;
   const seasonTrackerLen =
     state.seasonTracker && typeof state.seasonTracker === "object" ? Object.keys(state.seasonTracker).length : 0;
-  if (historyLen > 0 || bonusHistoryLen > 0 || submittedMvpsLen > 0 || seasonTrackerLen > 0) return true;
+  if (historyLen > 0 || bonusHistoryLen > 0 || defenseHistoryLen > 0 || submittedMvpsLen > 0 || seasonTrackerLen > 0)
+    return true;
 
   return BG_NAMES.some((bg) => {
     const rows = Array.isArray(state.data?.[bg]) ? state.data[bg] : [];
@@ -30,10 +32,12 @@ const isLikelyBootstrapSnapshot = (state: any) => {
   if (!state || typeof state !== "object") return true;
   const historyLen = Array.isArray(state.history) ? state.history.length : 0;
   const bonusHistoryLen = Array.isArray(state.bonusHistory) ? state.bonusHistory.length : 0;
+  const defenseHistoryLen = Array.isArray(state.defenseHistory) ? state.defenseHistory.length : 0;
   const submittedMvpsLen = Array.isArray(state.submittedMvps) ? state.submittedMvps.length : 0;
   const seasonTrackerLen =
     state.seasonTracker && typeof state.seasonTracker === "object" ? Object.keys(state.seasonTracker).length : 0;
-  if (historyLen > 0 || bonusHistoryLen > 0 || submittedMvpsLen > 0 || seasonTrackerLen > 0) return false;
+  if (historyLen > 0 || bonusHistoryLen > 0 || defenseHistoryLen > 0 || submittedMvpsLen > 0 || seasonTrackerLen > 0)
+    return false;
 
   return BG_NAMES.every((bg) => {
     const rows = Array.isArray(state.data?.[bg]) ? state.data[bg] : [];
@@ -90,8 +94,10 @@ const mergeState = (existingState: any, incomingState: any) => {
   const incomingHistory = Array.isArray(incomingState.history) ? incomingState.history : [];
   const existingBonusHistory = Array.isArray(existingState.bonusHistory) ? existingState.bonusHistory : [];
   const incomingBonusHistory = Array.isArray(incomingState.bonusHistory) ? incomingState.bonusHistory : [];
-  const existingProgress = Math.max(existingHistory.length, existingBonusHistory.length);
-  const incomingProgress = Math.max(incomingHistory.length, incomingBonusHistory.length);
+  const existingDefenseHistory = Array.isArray(existingState.defenseHistory) ? existingState.defenseHistory : [];
+  const incomingDefenseHistory = Array.isArray(incomingState.defenseHistory) ? incomingState.defenseHistory : [];
+  const existingProgress = Math.max(existingHistory.length, existingBonusHistory.length, existingDefenseHistory.length);
+  const incomingProgress = Math.max(incomingHistory.length, incomingBonusHistory.length, incomingDefenseHistory.length);
 
   const existingUpdatedAt = Number(existingState.updatedAt || 0);
   const incomingUpdatedAt = Number(incomingState.updatedAt || 0);
@@ -107,6 +113,8 @@ const mergeState = (existingState: any, incomingState: any) => {
     seasonTracker: useIncomingMeta ? incomingState.seasonTracker ?? existingState.seasonTracker : existingState.seasonTracker,
     bonusDraft: useIncomingMeta ? incomingState.bonusDraft ?? existingState.bonusDraft : existingState.bonusDraft,
     bonusHistory: useIncomingMeta ? incomingBonusHistory : existingBonusHistory,
+    defenseDraft: useIncomingMeta ? incomingState.defenseDraft ?? existingState.defenseDraft : existingState.defenseDraft,
+    defenseHistory: useIncomingMeta ? incomingDefenseHistory : existingDefenseHistory,
     updatedAt: Math.max(existingUpdatedAt, incomingUpdatedAt),
   };
 };
@@ -128,6 +136,8 @@ const createInitialState = () => {
     seasonTracker: {},
     bonusDraft: { BG1: 0, BG2: 0, BG3: 0 },
     bonusHistory: [],
+    defenseDraft: { BG1: 0, BG2: 0, BG3: 0 },
+    defenseHistory: [],
     updatedAt: 0,
   };
 };
@@ -255,6 +265,47 @@ export const updateBonusDraft = mutation({
       ...baseState,
       bonusDraft: {
         ...(baseState.bonusDraft || { BG1: 0, BG2: 0, BG3: 0 }),
+        [args.bg]: Number(args.value || 0),
+      },
+      updatedAt: Math.max(Number(baseState.updatedAt || 0), Date.now()),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        state: nextState,
+        updatedAt: nextState.updatedAt,
+        updatedBy: identity?.subject ?? "anonymous",
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("warStates", {
+      roomId: args.roomId,
+      state: nextState,
+      updatedAt: nextState.updatedAt,
+      updatedBy: identity?.subject ?? "anonymous",
+    });
+  },
+});
+
+export const updateDefenseDraft = mutation({
+  args: {
+    roomId: v.string(),
+    bg: v.union(v.literal("BG1"), v.literal("BG2"), v.literal("BG3")),
+    value: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const existing = await ctx.db
+      .query("warStates")
+      .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
+      .unique();
+
+    const baseState = normalizeState(existing?.state ?? null);
+    const nextState = {
+      ...baseState,
+      defenseDraft: {
+        ...(baseState.defenseDraft || { BG1: 0, BG2: 0, BG3: 0 }),
         [args.bg]: Number(args.value || 0),
       },
       updatedAt: Math.max(Number(baseState.updatedAt || 0), Date.now()),

@@ -32,6 +32,7 @@ type BGResults = Record<BG, BGResult>;
 type SubmittedMvp = { bg: BG; name: string; kd: number };
 type SeasonTracker = Record<string, { name: string; kills: number; deaths: number; wars: number; kdSum: number }>;
 type BonusCounts = Record<BG, number>;
+type DefenseCounts = Record<BG, number>;
 
 interface PersistedState {
   data: Data;
@@ -40,6 +41,8 @@ interface PersistedState {
   seasonTracker: SeasonTracker;
   bonusDraft: BonusCounts;
   bonusHistory: BonusCounts[];
+  defenseDraft: DefenseCounts;
+  defenseHistory: DefenseCounts[];
   updatedAt: number;
 }
 
@@ -51,6 +54,7 @@ const getStateRef = "state:getState" as any;
 const saveStateRef = "state:saveState" as any;
 const updatePlayerRef = "state:updatePlayer" as any;
 const updateBonusDraftRef = "state:updateBonusDraft" as any;
+const updateDefenseDraftRef = "state:updateDefenseDraft" as any;
 const resetStateRef = "state:resetState" as any;
 const GOD_GIF_URLS = [
   "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
@@ -91,6 +95,7 @@ const calculateSeasonKD = (kdSum: number, wars: number): number => {
 };
 
 const emptyBonusCounts = (): BonusCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
+const emptyDefenseCounts = (): DefenseCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
 
 const createInitialData = (existingNames: Data | null = null): Data => {
   return BG_NAMES.reduce((acc, bg) => {
@@ -143,6 +148,10 @@ const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, f
       parsed.seasonTracker && typeof parsed.seasonTracker === "object" ? (parsed.seasonTracker as SeasonTracker) : {},
     bonusDraft: normalizeBonusCounts(parsed.bonusDraft),
     bonusHistory: Array.isArray(parsed.bonusHistory) ? parsed.bonusHistory.map((row) => normalizeBonusCounts(row)) : [],
+    defenseDraft: normalizeBonusCounts((parsed as any).defenseDraft),
+    defenseHistory: Array.isArray((parsed as any).defenseHistory)
+      ? (parsed as any).defenseHistory.map((row: unknown) => normalizeBonusCounts(row))
+      : [],
     updatedAt: Number(parsed.updatedAt || fallbackUpdatedAt || 0),
   };
 };
@@ -165,11 +174,14 @@ export default function App() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [bonusDraft, setBonusDraft] = useState<BonusCounts>(emptyBonusCounts());
   const [bonusHistory, setBonusHistory] = useState<BonusCounts[]>([]);
+  const [defenseDraft, setDefenseDraft] = useState<DefenseCounts>(emptyDefenseCounts());
+  const [defenseHistory, setDefenseHistory] = useState<DefenseCounts[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
 
   const saveCloudState = useMutation(saveStateRef);
   const updatePlayerCloud = useMutation(updatePlayerRef);
   const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
+  const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
   const resetCloudState = useMutation(resetStateRef);
   const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
 
@@ -211,6 +223,8 @@ export default function App() {
     setSeasonTracker(snapshot.seasonTracker || {});
     setBonusDraft(snapshot.bonusDraft || emptyBonusCounts());
     setBonusHistory(snapshot.bonusHistory || []);
+    setDefenseDraft(snapshot.defenseDraft || emptyDefenseCounts());
+    setDefenseHistory(snapshot.defenseHistory || []);
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   };
@@ -288,12 +302,14 @@ export default function App() {
       seasonTracker,
       bonusDraft,
       bonusHistory,
+      defenseDraft,
+      defenseHistory,
       updatedAt: Date.now(),
     };
 
     latestUpdatedAtRef.current = snapshot.updatedAt;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-  }, [isHydrated, data, history, submittedMvps, seasonTracker, bonusDraft, bonusHistory]);
+  }, [isHydrated, data, history, submittedMvps, seasonTracker, bonusDraft, bonusHistory, defenseDraft, defenseHistory]);
 
   useEffect(() => {
     try {
@@ -321,9 +337,16 @@ export default function App() {
       return newData;
     });
 
-    if (isSignedIn) {
+    if (isSignedIn && field !== "name") {
       void updatePlayerCloud({ roomId: ROOM_ID, bg, index, player: nextPlayer });
     }
+  };
+
+  const syncPlayerName = (bg: BG, index: number) => {
+    if (!isSignedIn) return;
+    const player = data[bg]?.[index];
+    if (!player) return;
+    void updatePlayerCloud({ roomId: ROOM_ID, bg, index, player: { ...player, updatedAt: Date.now() } });
   };
 
   const updateBonusCount = (bg: BG, value: string) => {
@@ -337,6 +360,17 @@ export default function App() {
     }
   };
 
+  const updateDefenseCount = (bg: BG, value: string) => {
+    const parsed = value === "" ? 0 : Number(value);
+    setDefenseDraft((prev) => ({
+      ...prev,
+      [bg]: parsed,
+    }));
+    if (isSignedIn) {
+      void updateDefenseDraftCloud({ roomId: ROOM_ID, bg, value: parsed });
+    }
+  };
+
   const buildSnapshot = (
     overrides: Partial<Omit<PersistedState, "updatedAt">> = {},
   ): PersistedState => {
@@ -347,6 +381,8 @@ export default function App() {
       seasonTracker: overrides.seasonTracker ?? seasonTracker,
       bonusDraft: overrides.bonusDraft ?? bonusDraft,
       bonusHistory: overrides.bonusHistory ?? bonusHistory,
+      defenseDraft: overrides.defenseDraft ?? defenseDraft,
+      defenseHistory: overrides.defenseHistory ?? defenseHistory,
       updatedAt: Date.now(),
     };
   };
@@ -380,7 +416,9 @@ export default function App() {
     const nextSubmittedMvps = mvps;
     const nextHistory = [...history, mvps.map((m) => m.name)];
     const nextBonusHistory = [...bonusHistory, normalizeBonusCounts(bonusDraft)];
+    const nextDefenseHistory = [...defenseHistory, normalizeBonusCounts(defenseDraft)];
     const nextBonusDraft = emptyBonusCounts();
+    const nextDefenseDraft = emptyDefenseCounts();
     const nextSeasonTracker: SeasonTracker = { ...seasonTracker };
 
     playFx("submit");
@@ -406,6 +444,8 @@ export default function App() {
     setHistory(nextHistory);
     setBonusHistory(nextBonusHistory);
     setBonusDraft(nextBonusDraft);
+    setDefenseHistory(nextDefenseHistory);
+    setDefenseDraft(nextDefenseDraft);
     setSeasonTracker(nextSeasonTracker);
 
     if (isSignedIn) {
@@ -415,6 +455,8 @@ export default function App() {
         seasonTracker: nextSeasonTracker,
         bonusDraft: nextBonusDraft,
         bonusHistory: nextBonusHistory,
+        defenseDraft: nextDefenseDraft,
+        defenseHistory: nextDefenseHistory,
       });
       void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
     }
@@ -424,15 +466,18 @@ export default function App() {
     const nextData = createInitialData(data);
     const nextSubmittedMvps: SubmittedMvp[] = [];
     const nextBonusDraft = emptyBonusCounts();
+    const nextDefenseDraft = emptyDefenseCounts();
     setData(nextData);
     setSubmittedMvps(nextSubmittedMvps);
     setBonusDraft(nextBonusDraft);
+    setDefenseDraft(nextDefenseDraft);
 
     if (isSignedIn) {
       const snapshot = buildSnapshot({
         data: nextData,
         submittedMvps: nextSubmittedMvps,
         bonusDraft: nextBonusDraft,
+        defenseDraft: nextDefenseDraft,
       });
       void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
     }
@@ -447,6 +492,8 @@ export default function App() {
       seasonTracker: {},
       bonusDraft: emptyBonusCounts(),
       bonusHistory: [],
+      defenseDraft: emptyDefenseCounts(),
+      defenseHistory: [],
       updatedAt: Date.now(),
     };
     latestUpdatedAtRef.current = resetSnapshot.updatedAt;
@@ -521,20 +568,27 @@ export default function App() {
     const clownCounts = emptyBonusCounts();
     const saviourCounts = emptyBonusCounts();
 
-    bonusHistory.forEach((warBonus) => {
-      const values = BG_NAMES.map((bg) => Number(warBonus[bg] || 0));
-      const minValue = Math.min(...values);
-      const maxValue = Math.max(...values);
+    bonusHistory.forEach((warBonus, index) => {
+      const warDefense = defenseHistory[index] || emptyDefenseCounts();
 
-      BG_NAMES.forEach((bg) => {
-        const value = Number(warBonus[bg] || 0);
-        if (value === minValue) clownCounts[bg] += 1;
-        if (value === maxValue) saviourCounts[bg] += 1;
-      });
+      const saviourBg = [...BG_NAMES].sort((a, b) => {
+        const bonusDiff = Number(warBonus[b] || 0) - Number(warBonus[a] || 0);
+        if (bonusDiff !== 0) return bonusDiff;
+        return Number(warDefense[b] || 0) - Number(warDefense[a] || 0);
+      })[0];
+
+      const clownBg = [...BG_NAMES].sort((a, b) => {
+        const bonusDiff = Number(warBonus[a] || 0) - Number(warBonus[b] || 0);
+        if (bonusDiff !== 0) return bonusDiff;
+        return Number(warDefense[a] || 0) - Number(warDefense[b] || 0);
+      })[0];
+
+      saviourCounts[saviourBg] += 1;
+      clownCounts[clownBg] += 1;
     });
 
     return { clownCounts, saviourCounts };
-  }, [bonusHistory]);
+  }, [bonusHistory, defenseHistory]);
 
   const bonusClown = useMemo(() => {
     return BG_NAMES.map((bg) => ({ bg, count: bonusFrequency.clownCounts[bg] })).sort((a, b) => b.count - a.count)[0] ?? null;
@@ -561,6 +615,7 @@ export default function App() {
   const saviourMemeUrl =
     SAVIOUR_GIF_URLS[(Math.max(latestWarNumber, 1) - 1) % SAVIOUR_GIF_URLS.length];
   const latestBonus = bonusHistory.length > 0 ? bonusHistory[bonusHistory.length - 1] : emptyBonusCounts();
+  const latestDefense = defenseHistory.length > 0 ? defenseHistory[defenseHistory.length - 1] : emptyDefenseCounts();
 
   useEffect(() => {
     const nextGod = godOfBg?.name || "";
@@ -666,6 +721,7 @@ export default function App() {
                         className="input-player"
                         value={player.name}
                         onChange={(e) => updatePlayer(activeBG, i, "name", e.target.value)}
+                        onBlur={() => syncPlayerName(activeBG, i)}
                       />
                       <Input
                         type="number"
@@ -705,6 +761,27 @@ export default function App() {
                           value={bonusDraft[bg] === 0 ? "" : bonusDraft[bg]}
                           onFocus={(e) => e.target.select()}
                           onChange={(e) => updateBonusCount(bg, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bonus-line">
+                  <div className="bonus-label">War Defence Count</div>
+                  <div className="rival-row">
+                    {BG_NAMES.map((bg) => (
+                      <div key={`defense-box-${bg}`}>
+                        <label htmlFor={`defense-${bg}`} className="bonus-label">
+                          {bg}
+                        </label>
+                        <Input
+                          id={`defense-${bg}`}
+                          type="number"
+                          className="bonus-input"
+                          value={defenseDraft[bg] === 0 ? "" : defenseDraft[bg]}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => updateDefenseCount(bg, e.target.value)}
                         />
                       </div>
                     ))}
@@ -880,22 +957,24 @@ export default function App() {
                         {BG_NAMES.map((bg) => (
                           <div key={`latest-${bg}`} className="kd-track-row">
                             <span>{bg}</span>
-                            <span>Bonus {latestBonus[bg]}</span>
+                            <span>
+                              Bonus {latestBonus[bg]} | Defence {latestDefense[bg]}
+                            </span>
                           </div>
                         ))}
                       </div>
                     </div>
                     <div className="track-section">
-                      <h3 className="track-title">Bonus History</h3>
+                      <h3 className="track-title">Bonus + Defence History</h3>
                       {bonusHistory.map((warBonus, i) => (
                         <div key={`bonus-war-${i}`} className="history-card">
                           <div className="history-head">
                             <span className="history-war">War {i + 1}</span>
-                            <span className="history-meta">Bonus</span>
+                            <span className="history-meta">Bonus/Defence</span>
                           </div>
                           {BG_NAMES.map((bg) => (
                             <div key={`bonus-${i}-${bg}`} className="history-item">
-                              {bg}: {warBonus[bg]}
+                              {bg}: Bonus {warBonus[bg]} | Defence {(defenseHistory[i] || emptyDefenseCounts())[bg]}
                             </div>
                           ))}
                         </div>
