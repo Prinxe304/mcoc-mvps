@@ -672,7 +672,11 @@ export default function App() {
       <SignedIn>
         <p className="sync-note">Sync mode: Convex realtime (room: {ROOM_ID})</p>
         {!canEdit && (
-          <p className="sync-note">View only mode. Ask an admin to add your email in editor allowlist.</p>
+          <p className="sync-note">
+            View only mode. Ask admin to allow your identity:
+            {" "}
+            {(editAccess?.email || editAccess?.subject || editAccess?.tokenIdentifier || "unknown")}
+          </p>
         )}
 
         <div className="tabs-wrap">

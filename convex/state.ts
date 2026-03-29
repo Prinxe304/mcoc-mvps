@@ -15,18 +15,42 @@ const getIdentityEmail = (identity: any): string | null => {
     identity?.email ||
     identity?.emailAddress ||
     identity?.claims?.email ||
+    identity?.claims?.email_address ||
     identity?.claims?.["email"] ||
-    identity?.tokenIdentifier;
+    identity?.claims?.["email_address"] ||
+    null;
   if (!raw || typeof raw !== "string") return null;
-  return raw.toLowerCase();
+  return raw.toLowerCase().trim();
+};
+
+const getIdentityCandidates = (identity: any): string[] => {
+  const values = new Set<string>();
+  const add = (val: unknown) => {
+    if (typeof val !== "string") return;
+    const cleaned = val.trim().toLowerCase();
+    if (!cleaned) return;
+    values.add(cleaned);
+    cleaned.split("|").map((part) => part.trim()).filter(Boolean).forEach((part) => values.add(part));
+  };
+
+  add(getIdentityEmail(identity));
+  add(identity?.subject);
+  add(identity?.tokenIdentifier);
+  add(identity?.claims?.sub);
+  add(identity?.claims?.sid);
+  add(identity?.claims?.email);
+  add(identity?.claims?.email_address);
+  add(identity?.claims?.["email"]);
+  add(identity?.claims?.["email_address"]);
+  return Array.from(values);
 };
 
 const canEditByIdentity = (identity: any): boolean => {
   const allowed = getAllowedEditorEmails();
   if (allowed.length === 0) return true;
-  const email = getIdentityEmail(identity);
-  if (!email) return false;
-  return allowed.includes(email);
+  const candidates = getIdentityCandidates(identity);
+  if (candidates.length === 0) return false;
+  return allowed.some((entry) => candidates.some((candidate) => candidate === entry || candidate.includes(entry)));
 };
 
 const requireEditor = (identity: any) => {
@@ -192,9 +216,13 @@ export const getEditAccess = query({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
+    const candidates = getIdentityCandidates(identity);
     return {
       canEdit: canEditByIdentity(identity),
       email: getIdentityEmail(identity),
+      subject: identity?.subject ?? null,
+      tokenIdentifier: identity?.tokenIdentifier ?? null,
+      candidates,
       hasEditorList: getAllowedEditorEmails().length > 0,
     };
   },
