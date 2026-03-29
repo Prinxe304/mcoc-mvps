@@ -15,6 +15,7 @@ interface Player {
   name: string;
   kills: number;
   deaths: number;
+  updatedAt: number;
 }
 
 interface PlayerWithKD extends Player {
@@ -94,7 +95,27 @@ const createInitialData = (existingNames: Data | null = null): Data => {
       name: existingNames?.[bg]?.[i]?.name ?? `${bg}-Player${i + 1}`,
       kills: 0,
       deaths: 0,
+      updatedAt: Number(existingNames?.[bg]?.[i]?.updatedAt || 0),
     }));
+    return acc;
+  }, {} as Data);
+};
+
+const normalizeData = (maybeData: unknown): Data => {
+  const fallback = createInitialData();
+  if (!maybeData || typeof maybeData !== "object") return fallback;
+  const data = maybeData as Record<string, unknown>;
+  return BG_NAMES.reduce((acc, bg) => {
+    const rawPlayers = Array.isArray(data[bg]) ? (data[bg] as unknown[]) : [];
+    acc[bg] = Array.from({ length: PLAYERS_PER_BG }).map((_, i) => {
+      const row = (rawPlayers[i] as Partial<Player> | undefined) || {};
+      return {
+        name: typeof row.name === "string" && row.name.trim() ? row.name : `${bg}-Player${i + 1}`,
+        kills: Number(row.kills || 0),
+        deaths: Number(row.deaths || 0),
+        updatedAt: Number(row.updatedAt || 0),
+      };
+    });
     return acc;
   }, {} as Data);
 };
@@ -112,7 +133,7 @@ const normalizeBonusCounts = (maybeCounts: unknown): BonusCounts => {
 const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, fallbackUpdatedAt = 0): PersistedState | null => {
   if (!parsed) return null;
   return {
-    data: (parsed.data as Data) || createInitialData(),
+    data: normalizeData(parsed.data),
     history: Array.isArray(parsed.history) ? parsed.history : [],
     submittedMvps: Array.isArray(parsed.submittedMvps) ? parsed.submittedMvps : [],
     seasonTracker:
@@ -278,6 +299,7 @@ export default function App() {
         return {
           ...player,
           [field]: field === "name" ? value : Number(value),
+          updatedAt: Date.now(),
         };
       });
       return newData;
