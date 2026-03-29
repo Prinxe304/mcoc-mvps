@@ -216,6 +216,14 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!isAuthLoaded) return;
+
+    if (isSignedIn) {
+      // Signed-in users should always prefer shared cloud data.
+      setIsHydrated(true);
+      return;
+    }
+
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -228,9 +236,7 @@ export default function App() {
     }
 
     setIsHydrated(true);
-
-    return () => {};
-  }, []);
+  }, [isAuthLoaded, isSignedIn]);
 
   useEffect(() => {
     try {
@@ -264,6 +270,13 @@ export default function App() {
     if (!isSignedIn) {
       hasAppliedRemoteOnceRef.current = false;
       latestUpdatedAtRef.current = 0;
+      return;
+    }
+    // When switching to signed-in mode, discard stale local snapshot cache.
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore local storage failures.
     }
   }, [isSignedIn]);
 
