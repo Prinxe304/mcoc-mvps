@@ -3,15 +3,19 @@ import { mutation, query } from "./_generated/server";
 
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 const PLAYERS_PER_BG = 10;
+const ENV = ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}) as Record<
+  string,
+  string | undefined
+>;
 
 const getAllowedEditorEmails = () =>
-  (process.env.EDITOR_EMAILS || "")
+  (ENV.EDITOR_EMAILS || "")
     .split(",")
-    .map((email) => email.trim().toLowerCase())
+    .map((email: string) => email.trim().toLowerCase())
     .filter(Boolean);
 
 const shouldEnforceServerEditorCheck = () =>
-  String(process.env.ENFORCE_SERVER_EDITOR_CHECK || "").trim().toLowerCase() === "true";
+  String(ENV.ENFORCE_SERVER_EDITOR_CHECK || "").trim().toLowerCase() === "true";
 
 const getIdentityEmail = (identity: any): string | null => {
   const raw =
@@ -53,7 +57,9 @@ const canEditByIdentity = (identity: any): boolean => {
   if (allowed.length === 0) return true;
   const candidates = getIdentityCandidates(identity);
   if (candidates.length === 0) return false;
-  return allowed.some((entry) => candidates.some((candidate) => candidate === entry || candidate.includes(entry)));
+  return allowed.some((entry: string) =>
+    candidates.some((candidate: string) => candidate === entry || candidate.includes(entry)),
+  );
 };
 
 const requireEditor = (identity: any) => {
@@ -208,7 +214,7 @@ const normalizeState = (state: any) => {
 };
 
 export const getState = query({
-  args: { roomId: v.string(), pollTick: v.optional(v.number()) },
+  args: { roomId: v.string() },
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("warStates")

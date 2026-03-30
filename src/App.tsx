@@ -1,10 +1,11 @@
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth, useUser } from "@clerk/clerk-react";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
 import "./index.css";
+import { api } from "../convex/_generated/api";
 
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 type BG = (typeof BG_NAMES)[number];
@@ -182,14 +183,14 @@ export default function App() {
   const [defenseDraft, setDefenseDraft] = useState<DefenseCounts>(emptyDefenseCounts());
   const [defenseHistory, setDefenseHistory] = useState<DefenseCounts[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
-  const [pollTick, setPollTick] = useState(0);
 
   const saveCloudState = useMutation(saveStateRef);
   const updatePlayerCloud = useMutation(updatePlayerRef);
   const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
   const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
   const resetCloudState = useMutation(resetStateRef);
-  const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID, pollTick } : "skip");
+  const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
+  const convex = useConvex();
 
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
@@ -263,12 +264,27 @@ export default function App() {
   }, [isAuthLoaded, isSignedIn]);
 
   useEffect(() => {
-    if (!isSignedIn) return;
+    if (!isSignedIn || !isHydrated) return;
+    let cancelled = false;
     const id = window.setInterval(() => {
-      setPollTick((prev) => prev + 1);
+      void convex
+        .query(api.state.getState, { roomId: ROOM_ID })
+        .then((latest) => {
+          if (cancelled || !latest) return;
+          const snapshot = normalizeSnapshot(latest as Partial<PersistedState>);
+          if (!snapshot) return;
+          if (snapshot.updatedAt <= latestUpdatedAtRef.current) return;
+          applySnapshot(snapshot);
+        })
+        .catch(() => {
+          // Ignore polling errors. Live websocket query still handles primary sync.
+        });
     }, 2000);
-    return () => window.clearInterval(id);
-  }, [isSignedIn]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [isSignedIn, isHydrated, convex]);
 
   useEffect(() => {
     try {
