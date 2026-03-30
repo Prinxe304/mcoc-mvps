@@ -195,6 +195,7 @@ export default function App() {
   const latestUpdatedAtRef = useRef(0);
   const previousGodRef = useRef<string>("");
   const hasAppliedRemoteOnceRef = useRef(false);
+  const pendingNameSyncRef = useRef<Record<string, number>>({});
   const currentUserEmail = (user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || "")
     .trim()
     .toLowerCase();
@@ -321,6 +322,13 @@ export default function App() {
   }, [isSignedIn]);
 
   useEffect(() => {
+    return () => {
+      Object.values(pendingNameSyncRef.current).forEach((timerId) => window.clearTimeout(timerId));
+      pendingNameSyncRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isHydrated) return;
 
     if (skipPersistOnceRef.current) {
@@ -371,13 +379,35 @@ export default function App() {
       return newData;
     });
 
-    if (isSignedIn && field !== "name") {
+    if (!isSignedIn) return;
+
+    if (field !== "name") {
       void updatePlayerCloud({ roomId: ROOM_ID, bg, index, player: nextPlayer });
+      return;
     }
+
+    const timerKey = `${bg}-${index}`;
+    const prevTimer = pendingNameSyncRef.current[timerKey];
+    if (prevTimer) window.clearTimeout(prevTimer);
+    pendingNameSyncRef.current[timerKey] = window.setTimeout(() => {
+      void updatePlayerCloud({
+        roomId: ROOM_ID,
+        bg,
+        index,
+        player: { ...nextPlayer, updatedAt: Date.now() },
+      });
+      delete pendingNameSyncRef.current[timerKey];
+    }, 350);
   };
 
   const syncPlayerName = (bg: BG, index: number) => {
     if (!isSignedIn || !canEdit) return;
+    const timerKey = `${bg}-${index}`;
+    const prevTimer = pendingNameSyncRef.current[timerKey];
+    if (prevTimer) {
+      window.clearTimeout(prevTimer);
+      delete pendingNameSyncRef.current[timerKey];
+    }
     const player = data[bg]?.[index];
     if (!player) return;
     void updatePlayerCloud({ roomId: ROOM_ID, bg, index, player: { ...player, updatedAt: Date.now() } });
