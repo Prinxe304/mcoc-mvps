@@ -208,7 +208,7 @@ const normalizeState = (state: any) => {
 };
 
 export const getState = query({
-  args: { roomId: v.string() },
+  args: { roomId: v.string(), pollTick: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const row = await ctx.db
       .query("warStates")

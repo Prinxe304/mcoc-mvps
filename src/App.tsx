@@ -182,13 +182,14 @@ export default function App() {
   const [defenseDraft, setDefenseDraft] = useState<DefenseCounts>(emptyDefenseCounts());
   const [defenseHistory, setDefenseHistory] = useState<DefenseCounts[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [pollTick, setPollTick] = useState(0);
 
   const saveCloudState = useMutation(saveStateRef);
   const updatePlayerCloud = useMutation(updatePlayerRef);
   const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
   const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
   const resetCloudState = useMutation(resetStateRef);
-  const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
+  const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID, pollTick } : "skip");
 
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
@@ -260,6 +261,14 @@ export default function App() {
 
     setIsHydrated(true);
   }, [isAuthLoaded, isSignedIn]);
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    const id = window.setInterval(() => {
+      setPollTick((prev) => prev + 1);
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [isSignedIn]);
 
   useEffect(() => {
     try {
