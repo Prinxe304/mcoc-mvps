@@ -5,7 +5,6 @@ import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
 import "./index.css";
-import { api } from "../convex/_generated/api";
 
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 type BG = (typeof BG_NAMES)[number];
@@ -268,7 +267,7 @@ export default function App() {
     let cancelled = false;
     const id = window.setInterval(() => {
       void convex
-        .query(api.state.getState, { roomId: ROOM_ID })
+        .query(getStateRef as any, { roomId: ROOM_ID })
         .then((latest) => {
           if (cancelled || !latest) return;
           const snapshot = normalizeSnapshot(latest as Partial<PersistedState>);
