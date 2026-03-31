@@ -10,6 +10,7 @@ const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 type BG = (typeof BG_NAMES)[number];
 
 const PLAYERS_PER_BG = 10;
+const TEST_WARS_TO_IGNORE = 8;
 
 interface Player {
   name: string;
@@ -712,12 +713,35 @@ export default function App() {
   const kdListSource = seasonKdTable.length > 0 ? seasonKdTable : fallbackKdTable;
   const seasonLeaderboard = useMemo(() => {
     const count: Record<string, number> = {};
-    history.flat().forEach((name) => {
+    const allNames = new Set<string>();
+
+    BG_NAMES.forEach((bg) => {
+      data[bg].forEach((player, i) => {
+        if (i === PLAYERS_PER_BG - 1) return;
+        const name = player.name.trim();
+        if (!name) return;
+        allNames.add(name);
+      });
+    });
+
+    Object.entries(seasonTracker).forEach(([key, stats]) => {
+      const name = ((stats as any).name as string | undefined)?.trim() || key;
       if (!name) return;
+      if (backupPlayerNames.has(name.toLowerCase())) return;
+      allNames.add(name);
+    });
+
+    allNames.forEach((name) => {
+      count[name] = 0;
+    });
+
+    history.slice(TEST_WARS_TO_IGNORE).flat().forEach((name) => {
+      if (!name) return;
+      if (!(name in count)) count[name] = 0;
       count[name] = (count[name] || 0) + 1;
     });
-    return Object.entries(count).sort((a, b) => b[1] - a[1]);
-  }, [history]);
+    return Object.entries(count).sort((a, b) => (b[1] === a[1] ? a[0].localeCompare(b[0]) : b[1] - a[1]));
+  }, [history, data, seasonTracker, backupPlayerNames]);
   const godOfBg = seasonKdTable[0] ?? null;
   const loserBracket = seasonKdTable.length > 1 ? seasonKdTable[seasonKdTable.length - 1] : null;
   const visibleSeasonKdRows = showAllKdPlayers ? kdListSource : kdListSource.slice(0, 5);
