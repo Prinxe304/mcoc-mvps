@@ -33,6 +33,7 @@ type SubmittedMvp = { bg: BG; name: string; kd: number };
 type SeasonTracker = Record<string, { name: string; kills: number; deaths: number; wars: number; kdSum: number }>;
 type BonusCounts = Record<BG, number>;
 type DefenseCounts = Record<BG, number>;
+type BackupTracker = Record<BG, { name: string; kills: number; deaths: number; wars: number; kdSum: number; fairScoreSum: number }>;
 
 interface PersistedState {
   data: Data;
@@ -43,6 +44,7 @@ interface PersistedState {
   bonusHistory: BonusCounts[];
   defenseDraft: DefenseCounts;
   defenseHistory: DefenseCounts[];
+  backupTracker: BackupTracker;
   updatedAt: number;
 }
 
@@ -100,6 +102,11 @@ const calculateSeasonKD = (kdSum: number, wars: number): number => {
 
 const emptyBonusCounts = (): BonusCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
 const emptyDefenseCounts = (): DefenseCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
+const emptyBackupTracker = (): BackupTracker => ({
+  BG1: { name: "BG1-Player10", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
+  BG2: { name: "BG2-Player10", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
+  BG3: { name: "BG3-Player10", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
+});
 
 const createInitialData = (existingNames: Data | null = null): Data => {
   return BG_NAMES.reduce((acc, bg) => {
@@ -156,6 +163,14 @@ const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, f
     defenseHistory: Array.isArray((parsed as any).defenseHistory)
       ? (parsed as any).defenseHistory.map((row: unknown) => normalizeBonusCounts(row))
       : [],
+    backupTracker:
+      parsed.backupTracker && typeof parsed.backupTracker === "object"
+        ? ({
+            BG1: { ...emptyBackupTracker().BG1, ...(parsed.backupTracker as any).BG1 },
+            BG2: { ...emptyBackupTracker().BG2, ...(parsed.backupTracker as any).BG2 },
+            BG3: { ...emptyBackupTracker().BG3, ...(parsed.backupTracker as any).BG3 },
+          } as BackupTracker)
+        : emptyBackupTracker(),
     updatedAt: Number(parsed.updatedAt || fallbackUpdatedAt || 0),
   };
 };
@@ -181,6 +196,7 @@ export default function App() {
   const [bonusHistory, setBonusHistory] = useState<BonusCounts[]>([]);
   const [defenseDraft, setDefenseDraft] = useState<DefenseCounts>(emptyDefenseCounts());
   const [defenseHistory, setDefenseHistory] = useState<DefenseCounts[]>([]);
+  const [backupTracker, setBackupTracker] = useState<BackupTracker>(emptyBackupTracker());
   const [isHydrated, setIsHydrated] = useState(false);
 
   const saveCloudState = useMutation(saveStateRef);
@@ -236,6 +252,7 @@ export default function App() {
     setBonusHistory(snapshot.bonusHistory || []);
     setDefenseDraft(snapshot.defenseDraft || emptyDefenseCounts());
     setDefenseHistory(snapshot.defenseHistory || []);
+    setBackupTracker(snapshot.backupTracker || emptyBackupTracker());
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   };
@@ -345,12 +362,13 @@ export default function App() {
       bonusHistory,
       defenseDraft,
       defenseHistory,
+      backupTracker,
       updatedAt: Date.now(),
     };
 
     latestUpdatedAtRef.current = snapshot.updatedAt;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-  }, [isHydrated, data, history, submittedMvps, seasonTracker, bonusDraft, bonusHistory, defenseDraft, defenseHistory]);
+  }, [isHydrated, data, history, submittedMvps, seasonTracker, bonusDraft, bonusHistory, defenseDraft, defenseHistory, backupTracker]);
 
   useEffect(() => {
     try {
@@ -449,6 +467,7 @@ export default function App() {
       bonusHistory: overrides.bonusHistory ?? bonusHistory,
       defenseDraft: overrides.defenseDraft ?? defenseDraft,
       defenseHistory: overrides.defenseHistory ?? defenseHistory,
+      backupTracker: overrides.backupTracker ?? backupTracker,
       updatedAt: Date.now(),
     };
   };
@@ -487,6 +506,7 @@ export default function App() {
     const nextBonusDraft = emptyBonusCounts();
     const nextDefenseDraft = emptyDefenseCounts();
     const nextSeasonTracker: SeasonTracker = { ...seasonTracker };
+    const nextBackupTracker: BackupTracker = { ...backupTracker };
 
     playFx("submit");
 
@@ -505,6 +525,25 @@ export default function App() {
           kdSum: current.kdSum + warKd,
         };
       });
+
+      const bgRows = data[bg] || [];
+      const backup = bgRows[PLAYERS_PER_BG - 1] || { name: `${bg}-Player10`, kills: 0, deaths: 0 };
+      const backupKills = Number((backup as any).kills || 0);
+      const backupDeaths = Number((backup as any).deaths || 0);
+      const backupKd = calculateKD(backupKills, backupDeaths);
+      const teamKills = bgRows.reduce((sum, player) => sum + Number(player.kills || 0), 0);
+      const teamAvgKills = bgRows.length > 0 ? teamKills / bgRows.length : 0;
+      const killRatio = backupKills / Math.max(teamAvgKills, 1);
+      const fairScore = killRatio * 70 + backupKd * 30;
+      const currentBackup = nextBackupTracker[bg] || emptyBackupTracker()[bg];
+      nextBackupTracker[bg] = {
+        name: String((backup as any).name || currentBackup.name || `${bg}-Player10`),
+        kills: Number(currentBackup.kills || 0) + backupKills,
+        deaths: Number(currentBackup.deaths || 0) + backupDeaths,
+        wars: Number(currentBackup.wars || 0) + 1,
+        kdSum: Number(currentBackup.kdSum || 0) + backupKd,
+        fairScoreSum: Number(currentBackup.fairScoreSum || 0) + fairScore,
+      };
     });
 
     setSubmittedMvps(nextSubmittedMvps);
@@ -514,6 +553,7 @@ export default function App() {
     setDefenseHistory(nextDefenseHistory);
     setDefenseDraft(nextDefenseDraft);
     setSeasonTracker(nextSeasonTracker);
+    setBackupTracker(nextBackupTracker);
 
     if (isSignedIn) {
       const snapshot = buildSnapshot({
@@ -524,6 +564,7 @@ export default function App() {
         bonusHistory: nextBonusHistory,
         defenseDraft: nextDefenseDraft,
         defenseHistory: nextDefenseHistory,
+        backupTracker: nextBackupTracker,
       });
       void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
     }
@@ -563,6 +604,7 @@ export default function App() {
       bonusHistory: [],
       defenseDraft: emptyDefenseCounts(),
       defenseHistory: [],
+      backupTracker: emptyBackupTracker(),
       updatedAt: Date.now(),
     };
     latestUpdatedAtRef.current = resetSnapshot.updatedAt;
@@ -645,23 +687,21 @@ export default function App() {
       : null;
   const backupMvpRows = useMemo(() => {
     return BG_NAMES.map((bg) => {
-      const rows = data[bg] || [];
-      const backup = rows[PLAYERS_PER_BG - 1] || { name: `${bg}-Player10`, kills: 0, deaths: 0, updatedAt: 0 };
-      const teamKills = rows.reduce((sum, player) => sum + Number(player.kills || 0), 0);
-      const teamAvgKills = rows.length > 0 ? teamKills / rows.length : 0;
-      const kd = calculateKD(Number(backup.kills || 0), Number(backup.deaths || 0));
-      const killRatio = Number(backup.kills || 0) / Math.max(teamAvgKills, 1);
-      const fairScore = Number((killRatio * 70 + kd * 30).toFixed(2));
+      const stats = backupTracker[bg] || emptyBackupTracker()[bg];
+      const wars = Number(stats.wars || 0);
+      const kd = wars > 0 ? calculateSeasonKD(Number(stats.kdSum || 0), wars) : 0;
+      const fairScore = wars > 0 ? Number(stats.fairScoreSum || 0) / wars : 0;
       return {
         bg,
-        name: backup.name || `${bg}-Player10`,
-        kills: Number(backup.kills || 0),
-        deaths: Number(backup.deaths || 0),
+        name: String(stats.name || `${bg}-Player10`),
+        kills: Number(stats.kills || 0),
+        deaths: Number(stats.deaths || 0),
         kd,
         fairScore,
+        wars,
       };
     }).sort((a, b) => b.fairScore - a.fairScore);
-  }, [data]);
+  }, [backupTracker]);
 
   const bonusFrequency = useMemo(() => {
     const clownCounts = emptyBonusCounts();
