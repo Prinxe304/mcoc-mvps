@@ -696,12 +696,13 @@ export default function App() {
   const backupMvpRows = useMemo(() => {
     return BG_NAMES.map((bg) => {
       const stats = backupTracker[bg] || emptyBackupTracker()[bg];
+      const liveName = data[bg]?.[PLAYERS_PER_BG - 1]?.name?.trim();
       const wars = Number(stats.wars || 0);
       const kd = wars > 0 ? calculateSeasonKD(Number(stats.kdSum || 0), wars) : 0;
       const fairScore = wars > 0 ? Number(stats.fairScoreSum || 0) / wars : 0;
       return {
         bg,
-        name: String(stats.name || `${bg}-Player10`),
+        name: String(liveName || stats.name || `${bg}-Player10`),
         kills: Number(stats.kills || 0),
         deaths: Number(stats.deaths || 0),
         kd,
@@ -709,7 +710,7 @@ export default function App() {
         wars,
       };
     }).sort((a, b) => b.fairScore - a.fairScore);
-  }, [backupTracker]);
+  }, [backupTracker, data]);
 
   const bonusFrequency = useMemo(() => {
     const clownCounts = emptyBonusCounts();
