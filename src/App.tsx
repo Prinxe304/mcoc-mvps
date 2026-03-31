@@ -112,6 +112,29 @@ const calculateBackupWarScore = (kills: number, deaths: number): number => {
   return Math.max(0, Number((killScore + kdScore + cleanRunBonus - deathPenalty).toFixed(2)));
 };
 
+const buildBackupTrackerMigration = (data: Data, seasonTracker: SeasonTracker, historyLength: number): BackupTracker => {
+  const tracker = emptyBackupTracker();
+  BG_NAMES.forEach((bg) => {
+    const liveName = data[bg]?.[PLAYERS_PER_BG - 1]?.name?.trim() || `${bg}-Player10`;
+    const key = liveName.toLowerCase();
+    const stats = seasonTracker[key];
+    const kills = Number(stats?.kills || 0);
+    const deaths = Number(stats?.deaths || 0);
+    const wars = Math.max(historyLength, Number(stats?.wars || 0), 0);
+    const avgKd = calculateWarLeaderboardKD(kills, deaths);
+    const avgFair = calculateBackupWarScore(kills, deaths);
+    tracker[bg] = {
+      name: liveName,
+      kills,
+      deaths,
+      wars,
+      kdSum: avgKd * wars,
+      fairScoreSum: avgFair * wars,
+    };
+  });
+  return tracker;
+};
+
 const emptyBonusCounts = (): BonusCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
 const emptyDefenseCounts = (): DefenseCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
 const emptyBackupTracker = (): BackupTracker => ({
@@ -224,6 +247,7 @@ export default function App() {
   const previousGodRef = useRef<string>("");
   const hasAppliedRemoteOnceRef = useRef(false);
   const pendingNameSyncRef = useRef<Record<string, number>>({});
+  const backupMigrationDoneRef = useRef(false);
   const currentUserEmail = (user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || "")
     .trim()
     .toLowerCase();
@@ -483,6 +507,24 @@ export default function App() {
       updatedAt: Date.now(),
     };
   };
+
+  useEffect(() => {
+    if (backupMigrationDoneRef.current) return;
+    if (!isHydrated) return;
+    if (history.length === 0) return;
+
+    const needsMigration = BG_NAMES.some((bg) => Number(backupTracker?.[bg]?.wars || 0) < history.length);
+    if (!needsMigration) return;
+
+    const migrated = buildBackupTrackerMigration(data, seasonTracker, history.length);
+    backupMigrationDoneRef.current = true;
+    setBackupTracker(migrated);
+
+    if (isSignedIn && canEdit) {
+      const snapshot = buildSnapshot({ backupTracker: migrated });
+      void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt });
+    }
+  }, [isHydrated, history.length, backupTracker, data, seasonTracker, isSignedIn, canEdit]);
 
   const saveBgData = () => {
     if (!isSignedIn || !canEdit) return;
