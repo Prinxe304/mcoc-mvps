@@ -575,6 +575,15 @@ export default function App() {
   };
 
   const activeMVP = bgResults[activeBG]?.mvp;
+  const backupPlayerNames = useMemo(() => {
+    const names = new Set<string>();
+    BG_NAMES.forEach((bg) => {
+      const backupName = data[bg]?.[PLAYERS_PER_BG - 1]?.name?.trim().toLowerCase();
+      if (backupName) names.add(backupName);
+    });
+    return names;
+  }, [data]);
+
   const seasonKdTable = useMemo(() => {
     return Object.entries(seasonTracker)
       .map(([key, stats]) => {
@@ -592,14 +601,16 @@ export default function App() {
           kd: calculateSeasonKD(kdSum, wars),
         };
       })
+      .filter((row) => !backupPlayerNames.has(row.name.trim().toLowerCase()))
       .sort((a, b) => b.kd - a.kd);
-  }, [seasonTracker]);
+  }, [seasonTracker, backupPlayerNames]);
 
   const fallbackKdTable = useMemo(() => {
     const seen = new Set<string>();
     const rows: Array<{ name: string; kd: number; wars: number; kills: number; deaths: number }> = [];
     BG_NAMES.forEach((bg) => {
-      data[bg].forEach((player) => {
+      data[bg].forEach((player, i) => {
+        if (i === PLAYERS_PER_BG - 1) return;
         const name = player.name.trim();
         if (!name || seen.has(name)) return;
         seen.add(name);
