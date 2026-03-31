@@ -100,6 +100,17 @@ const calculateSeasonKD = (kdSum: number, wars: number): number => {
   return kdSum / wars;
 };
 
+const calculateBackupWarScore = (kills: number, deaths: number): number => {
+  const safeKills = Math.max(0, Number(kills || 0));
+  const safeDeaths = Math.max(0, Number(deaths || 0));
+  const kd = calculateKD(safeKills, safeDeaths);
+  const killScore = Math.min(safeKills, 2) * 25 + Math.max(safeKills - 2, 0) * 10;
+  const kdScore = kd * 30;
+  const deathPenalty = safeDeaths * 20;
+  const cleanRunBonus = safeDeaths === 0 && safeKills > 0 ? 20 : 0;
+  return Math.max(0, Number((killScore + kdScore + cleanRunBonus - deathPenalty).toFixed(2)));
+};
+
 const emptyBonusCounts = (): BonusCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
 const emptyDefenseCounts = (): DefenseCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
 const emptyBackupTracker = (): BackupTracker => ({
@@ -531,10 +542,7 @@ export default function App() {
       const backupKills = Number((backup as any).kills || 0);
       const backupDeaths = Number((backup as any).deaths || 0);
       const backupKd = calculateKD(backupKills, backupDeaths);
-      const teamKills = bgRows.reduce((sum, player) => sum + Number(player.kills || 0), 0);
-      const teamAvgKills = bgRows.length > 0 ? teamKills / bgRows.length : 0;
-      const killRatio = backupKills / Math.max(teamAvgKills, 1);
-      const fairScore = killRatio * 70 + backupKd * 30;
+      const fairScore = calculateBackupWarScore(backupKills, backupDeaths);
       const currentBackup = nextBackupTracker[bg] || emptyBackupTracker()[bg];
       nextBackupTracker[bg] = {
         name: String((backup as any).name || currentBackup.name || `${bg}-Player10`),
@@ -1023,7 +1031,7 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                <p className="sync-note">Score = 70% backup kill ratio vs BG average + 30% KD.</p>
+                <p className="sync-note">Score = kill weight (capped) + KD weight + clean-run bonus - death penalty.</p>
               </div>
 
               <div className="track-section">
