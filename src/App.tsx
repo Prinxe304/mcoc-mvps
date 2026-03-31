@@ -682,16 +682,12 @@ export default function App() {
       .map(([key, stats]) => {
         const kills = Number((stats as any).kills || 0);
         const deaths = Number((stats as any).deaths || 0);
-        const wars = Number((stats as any).wars || 0);
-        const kdSumFallback = calculateKD(kills, deaths) * Math.max(wars, 1);
-        const kdSum = Number((stats as any).kdSum ?? kdSumFallback);
         const name = ((stats as any).name as string | undefined)?.trim() || key;
         return {
           name,
           kills,
           deaths,
-          wars,
-          kd: calculateSeasonKD(kdSum, wars),
+          kd: calculateWarLeaderboardKD(kills, deaths),
         };
       })
       .filter((row) => !backupPlayerNames.has(row.name.trim().toLowerCase()))
