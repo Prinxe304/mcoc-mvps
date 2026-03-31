@@ -94,6 +94,7 @@ const calculateKD = (kills: number, deaths: number): number => {
   if (kills === 0 && deaths === 0) return 0;
   return kills / (deaths + 1);
 };
+const calculateWarLeaderboardKD = (kills: number, deaths: number): number => calculateKD(kills, deaths);
 
 const calculateSeasonKD = (kdSum: number, wars: number): number => {
   if (wars <= 0) return 0;
@@ -527,7 +528,7 @@ export default function App() {
         if (!rawName) return;
         const key = rawName.toLowerCase();
         const current = nextSeasonTracker[key] || { name: rawName, kills: 0, deaths: 0, wars: 0, kdSum: 0 };
-        const warKd = calculateKD(Number(player.kills || 0), Number(player.deaths || 0));
+        const warKd = calculateWarLeaderboardKD(Number(player.kills || 0), Number(player.deaths || 0));
         nextSeasonTracker[key] = {
           name: current.name || rawName,
           kills: current.kills + Number(player.kills || 0),
