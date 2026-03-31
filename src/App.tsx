@@ -1031,7 +1031,6 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                <p className="sync-note">Score = kill weight (capped) + KD weight + clean-run bonus - death penalty.</p>
               </div>
 
               <div className="track-section">
