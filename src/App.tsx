@@ -742,6 +742,7 @@ export default function App() {
     });
     return Object.entries(count).sort((a, b) => (b[1] === a[1] ? a[0].localeCompare(b[0]) : b[1] - a[1]));
   }, [history, data, seasonTracker, backupPlayerNames]);
+  const topThreeSeasonMvps = seasonLeaderboard.slice(0, 3);
   const godOfBg = seasonKdTable[0] ?? null;
   const loserBracket = seasonKdTable.length > 1 ? seasonKdTable[seasonKdTable.length - 1] : null;
   const visibleSeasonKdRows = showAllKdPlayers ? kdListSource : kdListSource.slice(0, 5);
@@ -1235,6 +1236,18 @@ export default function App() {
                 <div className="leaderboard-list">
                   {seasonLeaderboard.map((p, i) => (
                     <div key={p[0]} className={`leader-row ${i === 0 ? "leader-top" : ""}`}>
+                      <span>
+                        {i + 1}. {p[0]}
+                      </span>
+                      <span>{p[1]} MVPs</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!showLeaderboard && topThreeSeasonMvps.length > 0 && (
+                <div className="leaderboard-list">
+                  {topThreeSeasonMvps.map((p, i) => (
+                    <div key={`top3-${p[0]}`} className={`leader-row ${i === 0 ? "leader-top" : ""}`}>
                       <span>
                         {i + 1}. {p[0]}
                       </span>
