@@ -643,6 +643,25 @@ export default function App() {
           ? rivalryAStats.name
           : rivalryBStats.name
       : null;
+  const backupMvpRows = useMemo(() => {
+    return BG_NAMES.map((bg) => {
+      const rows = data[bg] || [];
+      const backup = rows[PLAYERS_PER_BG - 1] || { name: `${bg}-Player10`, kills: 0, deaths: 0, updatedAt: 0 };
+      const teamKills = rows.reduce((sum, player) => sum + Number(player.kills || 0), 0);
+      const teamAvgKills = rows.length > 0 ? teamKills / rows.length : 0;
+      const kd = calculateKD(Number(backup.kills || 0), Number(backup.deaths || 0));
+      const killRatio = Number(backup.kills || 0) / Math.max(teamAvgKills, 1);
+      const fairScore = Number((killRatio * 70 + kd * 30).toFixed(2));
+      return {
+        bg,
+        name: backup.name || `${bg}-Player10`,
+        kills: Number(backup.kills || 0),
+        deaths: Number(backup.deaths || 0),
+        kd,
+        fairScore,
+      };
+    }).sort((a, b) => b.fairScore - a.fairScore);
+  }, [data]);
 
   const bonusFrequency = useMemo(() => {
     const clownCounts = emptyBonusCounts();
@@ -949,6 +968,23 @@ export default function App() {
                   </Button>
                 </div>
               )}
+
+              <div className="track-section">
+                <h3 className="track-title">Backup MVP (BG10 only)</h3>
+                <div className="kd-track-list">
+                  {backupMvpRows.map((row, i) => (
+                    <div key={`backup-${row.bg}`} className="kd-track-row">
+                      <span>
+                        {i + 1}. {row.bg} - {row.name}
+                      </span>
+                      <span>
+                        Score {row.fairScore.toFixed(2)} | KD {row.kd.toFixed(2)} | K {row.kills} D {row.deaths}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="sync-note">Score = 70% backup kill ratio vs BG average + 30% KD.</p>
+              </div>
 
               <div className="track-section">
                 <h3 className="track-title">War Fortune</h3>
