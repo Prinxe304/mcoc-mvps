@@ -108,6 +108,7 @@ const calculateSeasonKD = (kdSum: number, wars: number): number => {
   if (wars <= 0) return 0;
   return kdSum / wars;
 };
+const capKdForDisplay = (value: number): number => Math.min(10, Math.max(0, Number(value || 0)));
 
 const calculateBackupWarScore = (kills: number, deaths: number): number => {
   const safeKills = Math.max(0, Number(kills || 0));
@@ -690,12 +691,14 @@ export default function App() {
       .map(([key, stats]) => {
         const kills = Number((stats as any).kills || 0);
         const deaths = Number((stats as any).deaths || 0);
+        const wars = Number((stats as any).wars || 0);
+        const kdSum = Number((stats as any).kdSum || 0);
         const name = ((stats as any).name as string | undefined)?.trim() || key;
         return {
           name,
           kills,
           deaths,
-          kd: calculateMainPlayerKDWithExtraPenalty(kills, deaths),
+          kd: capKdForDisplay(calculateSeasonKD(kdSum, wars)),
         };
       })
       .filter((row) => !backupPlayerNames.has(row.name.trim().toLowerCase()))
