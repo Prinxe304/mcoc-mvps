@@ -110,9 +110,9 @@ const calculateSeasonKD = (kdSum: number, wars: number): number => {
   return kdSum / wars;
 };
 const calculateAdjustedSeasonKD = (kdSum: number, wars: number): number => {
+  if (wars <= 0) return 0;
   const extraImportedWars = Math.max(0, IMPORTED_PAST_WARS - 1);
   const adjustedWars = wars + extraImportedWars;
-  if (adjustedWars <= 0) return 0;
   return kdSum / adjustedWars;
 };
 const capKdForDisplay = (value: number): number => Math.min(10, Math.max(0, Number(value || 0)));
@@ -699,13 +699,14 @@ export default function App() {
         const kills = Number((stats as any).kills || 0);
         const deaths = Number((stats as any).deaths || 0);
         const wars = Number((stats as any).wars || 0);
+        const countedWars = Math.max(0, wars - TEST_WARS_TO_IGNORE);
         const kdSum = Number((stats as any).kdSum || 0);
         const name = ((stats as any).name as string | undefined)?.trim() || key;
         return {
           name,
           kills,
           deaths,
-          kd: capKdForDisplay(calculateAdjustedSeasonKD(kdSum, wars)),
+          kd: capKdForDisplay(calculateAdjustedSeasonKD(kdSum, countedWars)),
         };
       })
       .filter((row) => !backupPlayerNames.has(row.name.trim().toLowerCase()))
