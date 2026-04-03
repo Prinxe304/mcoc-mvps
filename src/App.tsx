@@ -96,6 +96,13 @@ const calculateKD = (kills: number, deaths: number): number => {
   return kills / (deaths + 1);
 };
 const calculateWarLeaderboardKD = (kills: number, deaths: number): number => calculateKD(kills, deaths);
+const calculateMainPlayerKDWithExtraPenalty = (kills: number, deaths: number): number => {
+  const safeKills = Math.max(0, Number(kills || 0));
+  const safeDeaths = Math.max(0, Number(deaths || 0));
+  if (safeKills === 0 && safeDeaths === 0) return 0;
+  const extraDeathPenalty = safeKills > 5 ? safeDeaths : 0;
+  return safeKills / (safeDeaths + extraDeathPenalty + 1);
+};
 
 const calculateSeasonKD = (kdSum: number, wars: number): number => {
   if (wars <= 0) return 0;
@@ -571,7 +578,7 @@ export default function App() {
         if (!rawName) return;
         const key = rawName.toLowerCase();
         const current = nextSeasonTracker[key] || { name: rawName, kills: 0, deaths: 0, wars: 0, kdSum: 0 };
-        const warKd = calculateWarLeaderboardKD(Number(player.kills || 0), Number(player.deaths || 0));
+        const warKd = calculateMainPlayerKDWithExtraPenalty(Number(player.kills || 0), Number(player.deaths || 0));
         nextSeasonTracker[key] = {
           name: current.name || rawName,
           kills: current.kills + Number(player.kills || 0),
@@ -688,7 +695,7 @@ export default function App() {
           name,
           kills,
           deaths,
-          kd: calculateWarLeaderboardKD(kills, deaths),
+          kd: calculateMainPlayerKDWithExtraPenalty(kills, deaths),
         };
       })
       .filter((row) => !backupPlayerNames.has(row.name.trim().toLowerCase()))
