@@ -937,7 +937,10 @@ export default function App() {
                 </div>
 
                 {data[activeBG].map((player, i) => {
-                  const kd = calculateKD(player.kills, player.deaths);
+                  const kd =
+                    i === PLAYERS_PER_BG - 1
+                      ? calculateKD(player.kills, player.deaths)
+                      : calculateMainPlayerKDWithExtraPenalty(player.kills, player.deaths);
                   const isMVP = activeMVP?.name === player.name;
                   return (
                     <div key={`${activeBG}-${i}`} className={`player-row ${isMVP ? "is-mvp" : ""}`}>
