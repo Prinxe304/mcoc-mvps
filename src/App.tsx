@@ -11,7 +11,6 @@ type BG = (typeof BG_NAMES)[number];
 
 const PLAYERS_PER_BG = 10;
 const TEST_WARS_TO_IGNORE = 8;
-const IMPORTED_PAST_WARS = 2; // First tracked submit includes 2 past wars.
 
 interface Player {
   name: string;
@@ -108,12 +107,6 @@ const calculateMainPlayerKDWithExtraPenalty = (kills: number, deaths: number): n
 const calculateSeasonKD = (kdSum: number, wars: number): number => {
   if (wars <= 0) return 0;
   return kdSum / wars;
-};
-const calculateAdjustedSeasonKD = (kdSum: number, wars: number): number => {
-  if (wars <= 0) return 0;
-  const extraImportedWars = Math.max(0, IMPORTED_PAST_WARS - 1);
-  const adjustedWars = wars + extraImportedWars;
-  return kdSum / adjustedWars;
 };
 const capKdForDisplay = (value: number): number => Math.min(10, Math.max(0, Number(value || 0)));
 
@@ -706,7 +699,7 @@ export default function App() {
           name,
           kills,
           deaths,
-          kd: capKdForDisplay(calculateAdjustedSeasonKD(kdSum, countedWars)),
+          kd: capKdForDisplay(calculateSeasonKD(kdSum, countedWars)),
         };
       })
       .filter((row) => !backupPlayerNames.has(row.name.trim().toLowerCase()))
