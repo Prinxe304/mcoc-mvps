@@ -220,7 +220,7 @@ export default function App() {
   const [activeBG, setActiveBG] = useState<BG>("BG1");
   const [showTracking, setShowTracking] = useState(false);
   const [showFun, setShowFun] = useState(false);
-  const [showLeaderboard, setShowLeaderboard] = useState(true);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [submittedMvps, setSubmittedMvps] = useState<SubmittedMvp[]>([]);
   const [seasonTracker, setSeasonTracker] = useState<SeasonTracker>({});
   const [showAllKdPlayers, setShowAllKdPlayers] = useState(false);
