@@ -1,11 +1,10 @@
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth, useUser } from "@clerk/clerk-react";
-import { useAction, useConvex, useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
 import ChallengesPanel from "./components/Challenges";
-import WarPlannerPanel from "./components/WarPlanner";
 import "./index.css";
 import {
   appendChallengeLogEntry,
@@ -14,12 +13,6 @@ import {
   type Challenge,
 } from "./lib/challenges";
 import { normalizeSeasonChampion, type SeasonChampion } from "./lib/seasonChampion";
-import {
-  createInitialWarPlannerState,
-  normalizeWarPlannerState,
-  type WarPlannerBG,
-  type WarPlannerState,
-} from "./lib/warPlanner";
 
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 type BG = (typeof BG_NAMES)[number];
@@ -65,7 +58,6 @@ interface PersistedState {
   seasonTracker: SeasonTracker;
   challenges: Challenge[];
   previousSeasonChampion: SeasonChampion | null;
-  warPlanner: WarPlannerState;
   bonusDraft: BonusCounts;
   bonusHistory: BonusCounts[];
   defenseDraft: DefenseCounts;
@@ -80,13 +72,11 @@ const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global"
 
 const getStateRef = "state:getState" as any;
 const getEditAccessRef = "state:getEditAccess" as any;
-const planWarAiRef = "ai:planWar" as any;
 const saveStateRef = "state:saveState" as any;
 const replaceStateRef = "state:replaceState" as any;
 const updatePlayerRef = "state:updatePlayer" as any;
 const updateBonusDraftRef = "state:updateBonusDraft" as any;
 const updateDefenseDraftRef = "state:updateDefenseDraft" as any;
-const DEFAULT_WAR_PLANNER_STATE = createInitialWarPlannerState();
 const GOD_GIF_URLS = [
   "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
   "https://media.giphy.com/media/l3q2XhfQ8oCkm1Ts4/giphy.gif",
@@ -235,7 +225,6 @@ const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, f
       parsed.seasonTracker && typeof parsed.seasonTracker === "object" ? (parsed.seasonTracker as SeasonTracker) : {},
     challenges: normalizeChallenges((parsed as any).challenges),
     previousSeasonChampion: normalizeSeasonChampion((parsed as any).previousSeasonChampion),
-    warPlanner: normalizeWarPlannerState((parsed as any).warPlanner),
     bonusDraft: normalizeBonusCounts(parsed.bonusDraft),
     bonusHistory: Array.isArray(parsed.bonusHistory) ? parsed.bonusHistory.map((row) => normalizeBonusCounts(row)) : [],
     defenseDraft: normalizeBonusCounts((parsed as any).defenseDraft),
@@ -269,29 +258,24 @@ export default function App() {
   const [seasonTracker, setSeasonTracker] = useState<SeasonTracker>({});
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [previousSeasonChampion, setPreviousSeasonChampion] = useState<SeasonChampion | null>(null);
-  const [warPlanner, setWarPlanner] = useState<WarPlannerState>(DEFAULT_WAR_PLANNER_STATE);
   const [showAllKdPlayers, setShowAllKdPlayers] = useState(false);
   const [warFortune, setWarFortune] = useState("");
   const [rivalA, setRivalA] = useState("");
   const [rivalB, setRivalB] = useState("");
   const [showConfetti, setShowConfetti] = useState(false);
   const [cloudSaveError, setCloudSaveError] = useState<string>("");
-  const [aiPlanError, setAiPlanError] = useState<string>("");
-  const [isAiPlanning, setIsAiPlanning] = useState(false);
   const [bonusDraft, setBonusDraft] = useState<BonusCounts>(emptyBonusCounts());
   const [bonusHistory, setBonusHistory] = useState<BonusCounts[]>([]);
   const [defenseDraft, setDefenseDraft] = useState<DefenseCounts>(emptyDefenseCounts());
   const [defenseHistory, setDefenseHistory] = useState<DefenseCounts[]>([]);
   const [backupTracker, setBackupTracker] = useState<BackupTracker>(emptyBackupTracker());
   const [isHydrated, setIsHydrated] = useState(false);
-  const [showPlanner, setShowPlanner] = useState(false);
 
   const saveCloudState = useMutation(saveStateRef);
   const replaceCloudState = useMutation(replaceStateRef);
   const updatePlayerCloud = useMutation(updatePlayerRef);
   const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
   const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
-  const planWarAi = useAction(planWarAiRef);
   // resetCloudState intentionally unused now; Clear Saved Data persists champion memory via saveState.
   const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
   const remoteAccess = useQuery(getEditAccessRef, isSignedIn ? {} : "skip");
@@ -353,7 +337,6 @@ export default function App() {
     setSeasonTracker(snapshot.seasonTracker || {});
     setChallenges(snapshot.challenges || []);
     setPreviousSeasonChampion(snapshot.previousSeasonChampion || null);
-    setWarPlanner(snapshot.warPlanner || DEFAULT_WAR_PLANNER_STATE);
     setBonusDraft(snapshot.bonusDraft || emptyBonusCounts());
     setBonusHistory(snapshot.bonusHistory || []);
     setDefenseDraft(snapshot.defenseDraft || emptyDefenseCounts());
@@ -466,7 +449,6 @@ export default function App() {
       seasonTracker,
       challenges,
       previousSeasonChampion,
-      warPlanner,
       bonusDraft,
       bonusHistory,
       defenseDraft,
@@ -485,7 +467,6 @@ export default function App() {
     seasonTracker,
     challenges,
     previousSeasonChampion,
-    warPlanner,
     bonusDraft,
     bonusHistory,
     defenseDraft,
@@ -591,37 +572,6 @@ export default function App() {
       });
   };
 
-  const updateWarPlanner = (nextWarPlanner: WarPlannerState) => {
-    if (!canEdit) return;
-    setWarPlanner(nextWarPlanner);
-    if (!isSignedIn) return;
-    const snapshot = buildSnapshot({ warPlanner: nextWarPlanner });
-    void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt })
-      .then(() => setCloudSaveError(""))
-      .catch((err: any) => {
-        const msg = String(err?.message || err || "Unknown error");
-        setCloudSaveError(msg);
-      });
-  };
-
-  const runAiWarPlanner = async (details: string, bg: WarPlannerBG): Promise<string> => {
-    if (!canEdit) return "";
-    setIsAiPlanning(true);
-    setAiPlanError("");
-    try {
-      const result = await planWarAi({ details, bg });
-      const plannerText = String((result as any)?.plannerText || "");
-      if (!plannerText.trim()) throw new Error("AI returned an empty plan.");
-      return plannerText;
-    } catch (err: any) {
-      const msg = String(err?.message || err || "AI planning failed");
-      setAiPlanError(msg);
-      throw err;
-    } finally {
-      setIsAiPlanning(false);
-    }
-  };
-
   const buildSnapshot = (
     overrides: Partial<Omit<PersistedState, "updatedAt">> = {},
   ): PersistedState => {
@@ -632,7 +582,6 @@ export default function App() {
       seasonTracker: overrides.seasonTracker ?? seasonTracker,
       challenges: overrides.challenges ?? challenges,
       previousSeasonChampion: overrides.previousSeasonChampion ?? previousSeasonChampion,
-      warPlanner: overrides.warPlanner ?? warPlanner,
       bonusDraft: overrides.bonusDraft ?? bonusDraft,
       bonusHistory: overrides.bonusHistory ?? bonusHistory,
       defenseDraft: overrides.defenseDraft ?? defenseDraft,
@@ -811,7 +760,6 @@ export default function App() {
       seasonTracker: {},
       challenges: [],
       previousSeasonChampion: champion ?? null,
-      warPlanner: DEFAULT_WAR_PLANNER_STATE,
       bonusDraft: emptyBonusCounts(),
       bonusHistory: [],
       defenseDraft: emptyDefenseCounts(),
@@ -825,7 +773,6 @@ export default function App() {
     localStorage.setItem(ACTIVE_BG_STORAGE_KEY, "BG1");
     setShowFun(false);
     setShowChallenges(false);
-    setShowPlanner(false);
     setShowTracking(true);
     if (isSignedIn) {
       // Hard-replace the server state so old season data can't merge back in.
@@ -1064,32 +1011,6 @@ export default function App() {
             View only mode. Ask admin to allow your email: {currentUserEmail || (remoteAccess as any)?.email || "unknown"}
           </div>
         )}
-        {canEdit && (
-          <Card className="card-secondary planner-cta-card">
-            <CardContent className="card-secondary-content planner-cta-content">
-              <div className="planner-cta-copy">
-                <h2 className="section-title-left">War Planner</h2>
-                <p className="planner-cta-text">
-                  Build defender maps, assign your 10 attackers with 3 champs each, and score counters with prefight
-                  support.
-                </p>
-              </div>
-              <Button
-                type="button"
-                className="btn-primary planner-cta-button"
-                onClick={() => {
-                  setShowTracking(false);
-                  setShowFun(false);
-                  setShowChallenges(false);
-                  setShowPlanner(true);
-                }}
-              >
-                Open Planner
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
         <div className="tabs-wrap">
           {BG_NAMES.map((bg) => (
             <Button
@@ -1099,10 +1020,9 @@ export default function App() {
                 setShowTracking(false);
                 setShowFun(false);
                 setShowChallenges(false);
-                setShowPlanner(false);
                 setActiveBG(bg);
               }}
-              className={`tab-btn ${!showTracking && !showFun && !showChallenges && !showPlanner && activeBG === bg ? "is-active" : ""}`}
+              className={`tab-btn ${!showTracking && !showFun && !showChallenges && activeBG === bg ? "is-active" : ""}`}
             >
               {bg}
             </Button>
@@ -1112,7 +1032,6 @@ export default function App() {
             onClick={() => {
               setShowFun(false);
               setShowChallenges(false);
-              setShowPlanner(false);
               setShowTracking(true);
             }}
             className={`tab-btn ${showTracking ? "is-active" : ""}`}
@@ -1124,7 +1043,6 @@ export default function App() {
             onClick={() => {
               setShowTracking(false);
               setShowChallenges(false);
-              setShowPlanner(false);
               setShowFun(true);
             }}
             className={`tab-btn ${showFun ? "is-active" : ""}`}
@@ -1137,29 +1055,14 @@ export default function App() {
               setShowTracking(false);
               setShowFun(false);
               setShowChallenges(true);
-              setShowPlanner(false);
             }}
             className={`tab-btn ${showChallenges ? "is-active" : ""}`}
           >
             Challenges
           </Button>
-          {canEdit && (
-            <Button
-              type="button"
-              onClick={() => {
-                setShowTracking(false);
-                setShowFun(false);
-                setShowChallenges(false);
-                setShowPlanner(true);
-              }}
-              className={`tab-btn ${showPlanner ? "is-active" : ""}`}
-            >
-              Planner
-            </Button>
-          )}
         </div>
 
-        {!showTracking && !showFun && !showChallenges && !showPlanner && (
+        {!showTracking && !showFun && !showChallenges && (
           <>
             <Card className="card-main">
               <CardContent className="card-main-content">
@@ -1399,17 +1302,6 @@ export default function App() {
           </Card>
         )}
 
-        {showPlanner && canEdit && (
-          <WarPlannerPanel
-            canEdit={canEdit}
-            planner={warPlanner}
-            onChange={updateWarPlanner}
-            onAiPlan={runAiWarPlanner}
-            aiPlanError={aiPlanError}
-            isAiPlanning={isAiPlanning}
-          />
-        )}
-
         {showChallenges && (
           <ChallengesPanel
             canEdit={canEdit}
@@ -1496,7 +1388,7 @@ export default function App() {
           </Card>
         )}
 
-        {!showFun && !showChallenges && !showPlanner && submittedMvps.length > 0 && (
+        {!showFun && !showChallenges && submittedMvps.length > 0 && (
           <Card className="card-secondary card-leaderboard">
             <CardContent className="card-secondary-content">
               <div className="leaderboard-head" onClick={() => setShowLeaderboard((prev) => !prev)}>
@@ -1531,7 +1423,7 @@ export default function App() {
           </Card>
         )}
 
-        {!showFun && !showChallenges && !showPlanner && (
+        {!showFun && !showChallenges && (
           <Card className="card-secondary card-history">
             <CardContent className="card-secondary-content">
               <h2 className="section-title-left">War History</h2>
