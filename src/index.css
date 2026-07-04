@@ -322,6 +322,41 @@ body {
   padding: 14px;
 }
 
+.planner-cta-card {
+  width: min(860px, calc(100vw - 28px));
+  margin: 14px auto 4px;
+  padding: 16px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.12), transparent 38%),
+    linear-gradient(135deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.planner-cta-content {
+  padding: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.planner-cta-copy {
+  min-width: 0;
+}
+
+.planner-cta-text {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+  font-weight: 600;
+  max-width: 64ch;
+}
+
+.planner-cta-button {
+  flex: 0 0 auto;
+}
+
 .card-planner {
   padding: 16px;
   border-color: rgba(37, 99, 235, 0.16);
@@ -913,6 +948,15 @@ body {
 
   .rival-row {
     grid-template-columns: 1fr;
+  }
+
+  .planner-cta-card {
+    width: calc(100vw - 16px);
+  }
+
+  .planner-cta-content {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .planner-head,

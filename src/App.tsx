@@ -1028,6 +1028,31 @@ export default function App() {
             View only mode. Ask admin to allow your email: {currentUserEmail || (remoteAccess as any)?.email || "unknown"}
           </div>
         )}
+        {canEdit && (
+          <Card className="card-secondary planner-cta-card">
+            <CardContent className="card-secondary-content planner-cta-content">
+              <div className="planner-cta-copy">
+                <h2 className="section-title-left">War Planner</h2>
+                <p className="planner-cta-text">
+                  Build defender maps, assign your 10 attackers with 3 champs each, and score counters with prefight
+                  support.
+                </p>
+              </div>
+              <Button
+                type="button"
+                className="btn-primary planner-cta-button"
+                onClick={() => {
+                  setShowTracking(false);
+                  setShowFun(false);
+                  setShowChallenges(false);
+                  setShowPlanner(true);
+                }}
+              >
+                Open Planner
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="tabs-wrap">
           {BG_NAMES.map((bg) => (
