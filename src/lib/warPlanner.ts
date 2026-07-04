@@ -54,6 +54,12 @@ export interface WarNodePreset {
   tags: string;
   counters: string;
   notes: string;
+  difficulty: "Hard" | "Normal" | "Easy";
+  restrictions: string[];
+  encounterNodes: Array<{
+    name: string;
+    description: string;
+  }>;
 }
 
 export interface ChampionCounterProfile {
@@ -167,6 +173,35 @@ const buildNodePresets = (): WarNodePreset[] => {
     ["50", "Boss Island", "Final boss", "boss, power gain, unstoppable, regen", "power control, slow, heal block, buff control", "Reserve your safest counter."],
   ];
 
+  const tileOneNodes = [
+    {
+      name: "Deep Impact",
+      description:
+        "Special Attacks thrown into the Defender's Block gain +100% Block Penetration and +100% Attack Rating. Superiority: +300% Attack Rating instead, and inflict a 2 second Stun Passive at the end of the Special.",
+    },
+    {
+      name: "Empyreal Defiance",
+      description:
+        "Defenders are immune to Nullify, Stagger, Fate Seal, Buff Immunity and Neutralize, and their Buff Ability Accuracy cannot be modified.",
+    },
+    {
+      name: "Inflated Ego - 3",
+      description: "The Defender takes 100% less damage while they have fewer than 3 Buffs. These Buffs can be of the same type.",
+    },
+    {
+      name: "Invade",
+      description: "Both Champions have 100% Block Penetration and 300% increased Attack when hitting into a Block.",
+    },
+    {
+      name: "Kinetic Absorption - 1",
+      description: "Whenever the Attacker strikes the Defender's Block with a Basic Attack, the Defender gains 4% of their Max Power.",
+    },
+    {
+      name: "Make A Stand - 3",
+      description: "The Defender has indefinite Protection, reducing all damage received by 90%. It goes on cooldown for 15 seconds when knocked down.",
+    },
+  ];
+
   return rows.map(([placement, path, name, tags, counters, notes]) => ({
     key: `node-${placement}`,
     placement,
@@ -175,6 +210,25 @@ const buildNodePresets = (): WarNodePreset[] => {
     tags,
     counters,
     notes,
+    difficulty: Number(placement) <= 10 || Number(placement) >= 41 ? "Hard" : Number(placement) <= 30 ? "Normal" : "Easy",
+    restrictions: placement === "1" ? ["Min 7★ (Quest)", "Quest Tags: Hero"] : Number(placement) >= 41 ? ["Boss Island", "Reserve safest counter"] : ["Alliance War Tile"],
+    encounterNodes:
+      placement === "1"
+        ? tileOneNodes
+        : [
+            {
+              name,
+              description: notes,
+            },
+            {
+              name: "Threat Profile",
+              description: `Main danger tags: ${tags}.`,
+            },
+            {
+              name: "Counter Plan",
+              description: `Best tools to bring: ${counters}.`,
+            },
+          ],
   }));
 };
 

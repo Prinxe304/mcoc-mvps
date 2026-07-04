@@ -14,9 +14,10 @@ import {
   setWarPlannerSelectedBg,
   splitRosterChampions,
   suggestDefenderTags,
-  suggestSlotTags,
+  type ChampionCounterProfile,
   type WarPlannerBG,
   type WarPlannerBGPlan,
+  type WarPlannerMatchup,
   type WarPlannerState,
 } from "../lib/warPlanner";
 
@@ -29,7 +30,21 @@ type Props = {
   isAiPlanning?: boolean;
 };
 
+type ChampionClass = "science" | "skill" | "mystic" | "cosmic" | "tech" | "mutant";
+
 const BG_NAMES: WarPlannerBG[] = ["BG1", "BG2", "BG3"];
+const CHAMPION_CLASSES: ChampionClass[] = ["science", "skill", "mystic", "cosmic", "tech", "mutant"];
+const STAR_FILTERS = ["7★", "6★", "5★"];
+const RANK_FILTERS = ["R1", "R2", "R3", "R4", "R5", "R6"];
+
+const CLASS_LABELS: Record<ChampionClass, string> = {
+  science: "Science",
+  skill: "Skill",
+  mystic: "Mystic",
+  cosmic: "Cosmic",
+  tech: "Tech",
+  mutant: "Mutant",
+};
 
 const updateArrayItem = <T,>(items: T[], index: number, updater: (value: T) => T): T[] =>
   items.map((item, itemIndex) => (itemIndex === index ? updater(item) : item));
@@ -40,19 +55,42 @@ const normalizeLoose = (value: string): string =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
-const findKnownChampion = (text: string): string => {
+const findChampionProfile = (text: string): ChampionCounterProfile | null => {
   const normalized = normalizeLoose(text);
-  if (!normalized) return "";
-  const profiles = [...CHAMPION_COUNTER_DATABASE].sort((a, b) => b.name.length - a.name.length);
-  const match = profiles.find((profile) => {
-    const names = [profile.name, ...profile.aliases];
-    return names.some((name) => {
-      const candidate = normalizeLoose(name);
-      return normalized === candidate || normalized.includes(candidate);
-    });
-  });
-  return match?.name ?? text.trim();
+  if (!normalized) return null;
+  return (
+    CHAMPION_COUNTER_DATABASE.find((profile) => {
+      const names = [profile.name, ...profile.aliases];
+      return names.some((name) => {
+        const candidate = normalizeLoose(name);
+        return normalized === candidate || normalized.includes(candidate);
+      });
+    }) ?? null
+  );
 };
+
+const findKnownChampion = (text: string): string => findChampionProfile(text)?.name ?? text.trim();
+
+const hashChampionClass = (name: string): ChampionClass => {
+  const sum = normalizeLoose(name)
+    .split("")
+    .reduce((total, character) => total + character.charCodeAt(0), 0);
+  return CHAMPION_CLASSES[sum % CHAMPION_CLASSES.length];
+};
+
+const getChampionClass = (name: string): ChampionClass => {
+  const profile = findChampionProfile(name);
+  const classTag = profile?.tags.find((tag) => CHAMPION_CLASSES.includes(tag as ChampionClass));
+  return (classTag as ChampionClass | undefined) ?? hashChampionClass(name);
+};
+
+const championInitials = (name: string): string =>
+  name
+    .split(/\s+/g)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "?";
 
 const parsePlannerText = (text: string, plan: WarPlannerBGPlan): WarPlannerBGPlan => {
   const lines = text
@@ -119,13 +157,53 @@ const parsePlannerText = (text: string, plan: WarPlannerBGPlan): WarPlannerBGPla
   };
 };
 
+const matchupLabel = (matchup: WarPlannerMatchup | null | undefined): string => {
+  if (!matchup) return "Pick counter";
+  const player = matchup.attacker.name || `Player ${matchup.attackerIndex + 1}`;
+  return `${matchup.slot.name} · ${player}`;
+};
+
+const scoreLabel = (matchup: WarPlannerMatchup | null | undefined): string => {
+  if (!matchup) return "No plan yet";
+  if (matchup.score >= 90) return "Elite counter";
+  if (matchup.score >= 70) return "Strong counter";
+  if (matchup.score >= 48) return "Safe counter";
+  return "Playable";
+};
+
 export default function WarPlannerPanel({ canEdit, planner, onChange, onAiPlan, aiPlanError, isAiPlanning }: Props) {
   const activeBg = planner.selectedBg || "BG1";
   const activePlan = getWarPlannerBgPlan(planner, activeBg);
   const plan = useMemo(() => recommendWarPlan(planner, activeBg), [planner, activeBg]);
   const [aiDraft, setAiDraft] = useState("");
+  const [selectedTileIndex, setSelectedTileIndex] = useState(0);
+  const [selectedPlayerIndex, setSelectedPlayerIndex] = useState(0);
+  const [selectedClass, setSelectedClass] = useState<ChampionClass | "all">("all");
+  const [selectedStar, setSelectedStar] = useState("7★");
+  const [selectedRank, setSelectedRank] = useState("R3");
+  const [selectedRosterChampion, setSelectedRosterChampion] = useState("");
 
-  const setActiveBg = (bg: WarPlannerBG) => onChange(setWarPlannerSelectedBg(planner, bg));
+  const selectedPreset = WAR_NODE_PRESETS[selectedTileIndex] ?? WAR_NODE_PRESETS[0];
+  const selectedDefender = activePlan.defenders[selectedTileIndex] ?? activePlan.defenders[0];
+  const selectedRecommendation = plan.defenders[selectedTileIndex];
+  const selectedMatchup = selectedRecommendation?.assigned ?? selectedRecommendation?.best ?? null;
+  const selectedPlayer = activePlan.attackers[selectedPlayerIndex] ?? activePlan.attackers[0];
+  const selectedRoster = splitRosterChampions(selectedPlayer?.roster ?? "");
+  const filteredRoster = selectedRoster.filter((champion) => selectedClass === "all" || getChampionClass(champion) === selectedClass);
+  const tableRows = activePlan.defenders.map((defender, index) => {
+    const recommendation = plan.defenders[index];
+    return {
+      defender,
+      index,
+      preset: WAR_NODE_PRESETS[index],
+      matchup: recommendation?.assigned ?? recommendation?.best ?? null,
+    };
+  });
+
+  const setActiveBg = (bg: WarPlannerBG) => {
+    setSelectedTileIndex(0);
+    onChange(setWarPlannerSelectedBg(planner, bg));
+  };
 
   const setActivePlan = (nextPlan: WarPlannerBGPlan) => {
     if (!canEdit) return;
@@ -136,7 +214,7 @@ export default function WarPlannerPanel({ canEdit, planner, onChange, onAiPlan, 
     setActivePlan({
       ...activePlan,
       defenders: updateArrayItem(activePlan.defenders, index, (defender) => {
-        const next = { ...defender, name: value };
+        const next = { ...defender, name: findKnownChampion(value) || value };
         return { ...next, tags: suggestDefenderTags(next) };
       }),
     });
@@ -160,10 +238,6 @@ export default function WarPlannerPanel({ canEdit, planner, onChange, onAiPlan, 
         const next = preset ? applyNodePresetToDefender(defender, preset.key) : defender;
         return { ...next, tags: suggestDefenderTags(next) };
       }),
-      attackers: activePlan.attackers.map((attacker) => ({
-        ...attacker,
-        slots: attacker.slots.map((slot) => ({ ...slot, tags: suggestSlotTags(slot, attacker) })),
-      })),
     });
   };
 
@@ -188,24 +262,17 @@ export default function WarPlannerPanel({ canEdit, planner, onChange, onAiPlan, 
 
   const resetPlanner = () => {
     setActivePlan(getWarPlannerBgPlan(createInitialWarPlannerState(), activeBg));
+    setSelectedTileIndex(0);
+    setSelectedRosterChampion("");
   };
 
-  const assignmentsByPlayer = useMemo(() => {
-    const groups = activePlan.attackers.map((attacker, index) => ({
-      index,
-      name: attacker.name || `Player ${index + 1}`,
-      roster: splitRosterChampions(attacker.roster),
-      assignments: plan.assignments.filter((assignment) => assignment.attackerIndex === index),
-    }));
-    return groups.filter((group) => group.roster.length > 0 || group.assignments.length > 0);
-  }, [activePlan.attackers, plan.assignments]);
-
   return (
-    <Card className="card-secondary card-planner">
+    <Card className="card-secondary card-planner planner-dark-shell">
       <CardContent className="card-secondary-content">
         <div className="planner-head">
           <div>
-            <h2 className="section-title-left">War Planner</h2>
+            <h2 className="section-title-left planner-title">AW Planner</h2>
+            <p className="planner-subtitle">Enter defender names tile-wise, add each player's full roster, then let the planner assign the best 3 fights.</p>
             <div className="planner-bg-tabs">
               {BG_NAMES.map((bg) => (
                 <Button
@@ -222,7 +289,7 @@ export default function WarPlannerPanel({ canEdit, planner, onChange, onAiPlan, 
           <div className="planner-toolbar">
             <Button type="button" className="btn-secondary planner-tool-btn" onClick={applyAutoDetails} disabled={!canEdit}>
               <Sparkles aria-hidden="true" />
-              Auto Details
+              Nodes
             </Button>
             <Button type="button" className="btn-secondary planner-icon-btn" onClick={resetPlanner} disabled={!canEdit} title="Reset active BG">
               <RotateCcw aria-hidden="true" />
@@ -230,130 +297,242 @@ export default function WarPlannerPanel({ canEdit, planner, onChange, onAiPlan, 
           </div>
         </div>
 
-        <div className="planner-ai-panel">
-          <div className="planner-ai-copy">
-            <h3 className="planner-section-title">Paste Details</h3>
+        {canEdit && (
+          <div className="planner-command-bar">
+            <div>
+              <strong>AI import</strong>
+              <span>Paste defenders and rosters. Free AI formats it, local planner assigns fights.</span>
+            </div>
             <div className="planner-ai-actions">
               <Button
                 type="button"
                 className="btn-primary planner-tool-btn"
                 onClick={() => void askAi()}
-                disabled={!canEdit || !onAiPlan || !aiDraft.trim() || Boolean(isAiPlanning)}
+                disabled={!onAiPlan || !aiDraft.trim() || Boolean(isAiPlanning)}
               >
                 <Wand2 aria-hidden="true" />
                 {isAiPlanning ? "Planning..." : "Use AI"}
               </Button>
-              <Button type="button" className="btn-secondary planner-tool-btn" onClick={() => buildLocal()} disabled={!canEdit || !aiDraft.trim()}>
+              <Button type="button" className="btn-secondary planner-tool-btn" onClick={() => buildLocal()} disabled={!aiDraft.trim()}>
                 Build
               </Button>
             </div>
+            {aiPlanError && <div className="planner-ai-error">{aiPlanError}</div>}
+            <textarea
+              className="planner-ai-input"
+              value={aiDraft}
+              onChange={(e) => setAiDraft(e.target.value)}
+              placeholder={`Defenders\n1 Korg\n2 Photon\n3 Hulkling\n\nRosters\nPrince: Jean Grey, Doctor Doom, Scorpion, Hercules, Kate Bishop\nSerwan: Kate Bishop, Absorbing Man, Warlock, Hulkling`}
+            />
           </div>
-          {aiPlanError && <div className="planner-ai-error">{aiPlanError}</div>}
-          <textarea
-            className="planner-ai-input"
-            value={aiDraft}
-            disabled={!canEdit}
-            onChange={(e) => setAiDraft(e.target.value)}
-            placeholder={`Defenders\n1 Korg\n2 Photon\n3 Hulkling\n\nRosters\nPrince: Jean Grey, Doctor Doom, Scorpion, Hercules, Kate Bishop\nSerwan: Kate Bishop, Absorbing Man, Warlock, Hulkling`}
-          />
-        </div>
+        )}
 
-        <div className="planner-panel planner-results-panel planner-results-top">
-          <div className="planner-panel-content">
-            <div className="planner-results-head">
-              <h3 className="planner-section-title">Player Assignments</h3>
-              <div className="planner-chip">{plan.assignments.length} fights planned</div>
-            </div>
-            {assignmentsByPlayer.length === 0 ? (
-              <p className="planner-hint">Add defender names and player rosters, then build the plan.</p>
-            ) : (
-              <div className="planner-player-plan-grid">
-                {assignmentsByPlayer.map((group) => (
-                  <div key={group.index} className="planner-player-plan-card">
-                    <div className="planner-player-plan-head">
-                      <strong>{group.name}</strong>
-                      <span>{group.assignments.length}/3 fights</span>
-                    </div>
-                    <div className="planner-roster-preview">{group.roster.slice(0, 8).join(", ")}</div>
-                    <div className="planner-player-fights">
-                      {group.assignments.length === 0 ? (
-                        <span className="planner-muted">No defender assigned yet</span>
-                      ) : (
-                        group.assignments.map((assignment) => (
-                          <div key={`${assignment.defenderIndex}-${assignment.slot.name}`} className="planner-fight-row">
-                            <span>
-                              Tile {assignment.defender.placement}: {assignment.defender.name}
-                            </span>
-                            <strong>{assignment.slot.name}</strong>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+        <div className="planner-war-table">
+          <div className="planner-war-header">
+            <span>War Info</span>
+            <span>Alliance</span>
+            <span>Node</span>
+            <span>Attacker</span>
+            <span>Defender</span>
+            <span>Prefights</span>
+            <span>Player</span>
           </div>
-        </div>
-
-        <div className="planner-grid planner-clean-grid">
-          <div className="planner-panel">
-            <div className="planner-panel-content">
-              <h3 className="planner-section-title">Player Rosters</h3>
-              <div className="planner-list">
-                {activePlan.attackers.map((attacker, index) => (
-                  <div key={attacker.id} className="planner-row planner-roster-row">
+          <div className="planner-war-body">
+            {tableRows.map(({ defender, index, preset, matchup }) => {
+              const attackerClass = getChampionClass(matchup?.slot.name || defender.name || preset?.name || "champion");
+              const defenderClass = getChampionClass(defender.name || preset?.name || "defender");
+              return (
+                <button
+                  key={defender.id}
+                  type="button"
+                  className={`planner-war-row ${selectedTileIndex === index ? "is-selected" : ""}`}
+                  onClick={() => setSelectedTileIndex(index)}
+                >
+                  <span className="planner-war-info">
+                    <b>S68</b>
+                    <b>W-</b>
+                    <b>T{preset?.placement ?? index + 1}</b>
+                  </span>
+                  <span className="planner-war-alliance">Night Guardians</span>
+                  <span className="planner-node-number">{preset?.placement ?? index + 1}</span>
+                  <span className={`planner-champ-pill class-${attackerClass}`}>
+                    <span className="planner-avatar">{championInitials(matchup?.slot.name || "Pick")}</span>
+                    <span>{matchup ? matchup.slot.name : "Pick counter"}</span>
+                  </span>
+                  <span className={`planner-champ-pill class-${defenderClass}`}>
+                    <span className="planner-avatar">{championInitials(defender.name || "Def")}</span>
                     <Input
-                      value={attacker.name}
+                      value={defender.name}
                       disabled={!canEdit}
-                      onChange={(e) => updateRoster(index, "name", e.target.value)}
-                      placeholder={`Player ${index + 1}`}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => updateDefenderName(index, event.target.value)}
+                      placeholder="Defender"
                     />
-                    <textarea
-                      className="planner-roster-input"
-                      value={attacker.roster}
-                      disabled={!canEdit}
-                      onChange={(e) => updateRoster(index, "roster", e.target.value)}
-                      placeholder="Full roster: Hercules, Doom, Scorpion, Kate Bishop..."
-                    />
+                  </span>
+                  <span className="planner-prefight">{activePlan.support.active ? activePlan.support.name || "Prefight" : "-"}</span>
+                  <span className="planner-player-cell">
+                    <strong>{matchup?.attacker.name || "Unassigned"}</strong>
+                    <small>{activeBg}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="planner-detail-grid">
+          <section className="planner-tile-detail">
+            <div className="planner-detail-top">
+              <div>
+                <span className="planner-eyebrow">Tile {selectedPreset?.placement}</span>
+                <h3>{selectedDefender?.name || "Add defender name"}</h3>
+                <p>{selectedPreset?.path} · {selectedPreset?.name}</p>
+              </div>
+              <div className="planner-difficulty">
+                <span>Difficulty</span>
+                <b>{selectedPreset?.difficulty}</b>
+              </div>
+            </div>
+
+            <div className="planner-versus-card">
+              <div className={`planner-big-champ class-${getChampionClass(selectedDefender?.name || selectedPreset?.name || "defender")}`}>
+                <span className="planner-big-avatar">{championInitials(selectedDefender?.name || "Def")}</span>
+                <strong>{selectedDefender?.name || "Defender"}</strong>
+                <small>Defender</small>
+              </div>
+              <div className="planner-vs">VS</div>
+              <div className={`planner-big-champ class-${getChampionClass(selectedMatchup?.slot.name || "counter")}`}>
+                <span className="planner-big-avatar">{championInitials(selectedMatchup?.slot.name || "Pick")}</span>
+                <strong>{matchupLabel(selectedMatchup)}</strong>
+                <small>{scoreLabel(selectedMatchup)}</small>
+              </div>
+            </div>
+
+            <div className="planner-restrictions">
+              <strong>Restrictions</strong>
+              {selectedPreset?.restrictions.map((restriction) => (
+                <span key={restriction}>{restriction}</span>
+              ))}
+            </div>
+
+            <div className="planner-encounter-head">
+              <span>Encounter Nodes</span>
+              <button type="button" onClick={() => setSelectedTileIndex(Math.max(0, selectedTileIndex - 1))}>⌃</button>
+            </div>
+            <div className="planner-node-card-grid">
+              {selectedPreset?.encounterNodes.map((node) => (
+                <article key={node.name} className="planner-node-card">
+                  <span>i</span>
+                  <div>
+                    <h4>{node.name}</h4>
+                    <p>{node.description}</p>
                   </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="planner-roster-browser">
+            <div className="planner-roster-head">
+              <div>
+                <span className="planner-eyebrow">Player Roster</span>
+                <h3>{selectedPlayer?.name || `Player ${selectedPlayerIndex + 1}`}</h3>
+              </div>
+              <select
+                className="planner-player-select"
+                value={selectedPlayerIndex}
+                disabled={!canEdit}
+                onChange={(event) => {
+                  setSelectedPlayerIndex(Number(event.target.value));
+                  setSelectedRosterChampion("");
+                }}
+              >
+                {activePlan.attackers.map((attacker, index) => (
+                  <option key={attacker.id} value={index}>
+                    {attacker.name || `Player ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="planner-roster-editor">
+              <Input
+                value={selectedPlayer?.name ?? ""}
+                disabled={!canEdit}
+                onChange={(event) => updateRoster(selectedPlayerIndex, "name", event.target.value)}
+                placeholder={`Player ${selectedPlayerIndex + 1}`}
+              />
+              <textarea
+                className="planner-roster-input"
+                value={selectedPlayer?.roster ?? ""}
+                disabled={!canEdit}
+                onChange={(event) => updateRoster(selectedPlayerIndex, "roster", event.target.value)}
+                placeholder="Paste full roster: Hercules, Doctor Doom, Kate Bishop, Scorpion..."
+              />
+            </div>
+
+            <div className="planner-filter-panel">
+              <div className="planner-filter-row">
+                {STAR_FILTERS.map((star) => (
+                  <button key={star} type="button" className={selectedStar === star ? "is-active" : ""} onClick={() => setSelectedStar(star)}>
+                    {star}
+                  </button>
                 ))}
               </div>
-            </div>
-          </div>
-
-          <div className="planner-panel">
-            <div className="planner-panel-content">
-              <h3 className="planner-section-title">Tile Defenders</h3>
-              <div className="planner-list planner-defender-list">
-                {activePlan.defenders.map((defender, index) => {
-                  const preset = WAR_NODE_PRESETS[index];
-                  const best = plan.defenders[index]?.best ?? null;
-                  return (
-                    <div key={defender.id} className={`planner-tile-row ${best ? "is-assigned" : ""}`}>
-                      <div className="planner-tile-meta">
-                        <strong>Tile {preset?.placement ?? index + 1}</strong>
-                        <span>{preset?.path}</span>
-                      </div>
-                      <div className="planner-tile-body">
-                        <div className="planner-tile-node">
-                          <strong>{preset?.name}</strong>
-                          <span>{preset?.notes}</span>
-                        </div>
-                        <Input
-                          value={defender.name}
-                          disabled={!canEdit}
-                          onChange={(e) => updateDefenderName(index, e.target.value)}
-                          placeholder="Defender name"
-                        />
-                      </div>
-                      <div className="planner-tile-best">{best ? `${best.attacker.name || "Player"}: ${best.slot.name}` : "Waiting"}</div>
-                    </div>
-                  );
-                })}
+              <div className="planner-filter-row">
+                {RANK_FILTERS.map((rank) => (
+                  <button key={rank} type="button" className={selectedRank === rank ? "is-active" : ""} onClick={() => setSelectedRank(rank)}>
+                    {rank}
+                  </button>
+                ))}
+              </div>
+              <div className="planner-class-row">
+                <button type="button" className={selectedClass === "all" ? "is-active" : ""} onClick={() => setSelectedClass("all")}>
+                  All
+                </button>
+                {CHAMPION_CLASSES.map((championClass) => (
+                  <button
+                    key={championClass}
+                    type="button"
+                    className={`class-dot class-${championClass} ${selectedClass === championClass ? "is-active" : ""}`}
+                    onClick={() => setSelectedClass(championClass)}
+                    title={CLASS_LABELS[championClass]}
+                  >
+                    {CLASS_LABELS[championClass][0]}
+                  </button>
+                ))}
+              </div>
+              <div className="planner-dropdown-row">
+                <button type="button">Tags</button>
+                <button type="button">Categories</button>
+                <button type="button">Abilities</button>
+                <button type="button">Immunities</button>
               </div>
             </div>
-          </div>
+
+            <div className="planner-champion-grid">
+              {filteredRoster.length === 0 ? (
+                <div className="planner-empty-roster">Add roster champs for this player to see selectable cards.</div>
+              ) : (
+                filteredRoster.map((champion) => {
+                  const championClass = getChampionClass(champion);
+                  const selected = selectedRosterChampion === champion;
+                  return (
+                    <button
+                      key={champion}
+                      type="button"
+                      className={`planner-champion-card class-${championClass} ${selected ? "is-selected" : ""}`}
+                      onClick={() => setSelectedRosterChampion(champion)}
+                    >
+                      <span>{championInitials(champion)}</span>
+                      <strong>{champion}</strong>
+                      <small>{selectedStar} · {selectedRank}</small>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </section>
         </div>
       </CardContent>
     </Card>
