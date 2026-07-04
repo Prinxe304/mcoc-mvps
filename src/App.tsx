@@ -1,5 +1,5 @@
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth, useUser } from "@clerk/clerk-react";
-import { useConvex, useMutation, useQuery } from "convex/react";
+import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
@@ -17,6 +17,7 @@ import { normalizeSeasonChampion, type SeasonChampion } from "./lib/seasonChampi
 import {
   createInitialWarPlannerState,
   normalizeWarPlannerState,
+  type WarPlannerBG,
   type WarPlannerState,
 } from "./lib/warPlanner";
 
@@ -79,6 +80,7 @@ const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global"
 
 const getStateRef = "state:getState" as any;
 const getEditAccessRef = "state:getEditAccess" as any;
+const planWarAiRef = "ai:planWar" as any;
 const saveStateRef = "state:saveState" as any;
 const replaceStateRef = "state:replaceState" as any;
 const updatePlayerRef = "state:updatePlayer" as any;
@@ -274,6 +276,8 @@ export default function App() {
   const [rivalB, setRivalB] = useState("");
   const [showConfetti, setShowConfetti] = useState(false);
   const [cloudSaveError, setCloudSaveError] = useState<string>("");
+  const [aiPlanError, setAiPlanError] = useState<string>("");
+  const [isAiPlanning, setIsAiPlanning] = useState(false);
   const [bonusDraft, setBonusDraft] = useState<BonusCounts>(emptyBonusCounts());
   const [bonusHistory, setBonusHistory] = useState<BonusCounts[]>([]);
   const [defenseDraft, setDefenseDraft] = useState<DefenseCounts>(emptyDefenseCounts());
@@ -287,6 +291,7 @@ export default function App() {
   const updatePlayerCloud = useMutation(updatePlayerRef);
   const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
   const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
+  const planWarAi = useAction(planWarAiRef);
   // resetCloudState intentionally unused now; Clear Saved Data persists champion memory via saveState.
   const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
   const remoteAccess = useQuery(getEditAccessRef, isSignedIn ? {} : "skip");
@@ -597,6 +602,24 @@ export default function App() {
         const msg = String(err?.message || err || "Unknown error");
         setCloudSaveError(msg);
       });
+  };
+
+  const runAiWarPlanner = async (details: string, bg: WarPlannerBG): Promise<string> => {
+    if (!canEdit) return "";
+    setIsAiPlanning(true);
+    setAiPlanError("");
+    try {
+      const result = await planWarAi({ details, bg });
+      const plannerText = String((result as any)?.plannerText || "");
+      if (!plannerText.trim()) throw new Error("AI returned an empty plan.");
+      return plannerText;
+    } catch (err: any) {
+      const msg = String(err?.message || err || "AI planning failed");
+      setAiPlanError(msg);
+      throw err;
+    } finally {
+      setIsAiPlanning(false);
+    }
   };
 
   const buildSnapshot = (
@@ -1376,7 +1399,16 @@ export default function App() {
           </Card>
         )}
 
-        {showPlanner && canEdit && <WarPlannerPanel canEdit={canEdit} planner={warPlanner} onChange={updateWarPlanner} />}
+        {showPlanner && canEdit && (
+          <WarPlannerPanel
+            canEdit={canEdit}
+            planner={warPlanner}
+            onChange={updateWarPlanner}
+            onAiPlan={runAiWarPlanner}
+            aiPlanError={aiPlanError}
+            isAiPlanning={isAiPlanning}
+          />
+        )}
 
         {showChallenges && (
           <ChallengesPanel

@@ -26,6 +26,9 @@ type Props = {
   canEdit: boolean;
   planner: WarPlannerState;
   onChange: (next: WarPlannerState) => void;
+  onAiPlan?: (details: string, bg: WarPlannerBG) => Promise<string>;
+  aiPlanError?: string;
+  isAiPlanning?: boolean;
 };
 
 const BG_NAMES: WarPlannerBG[] = ["BG1", "BG2", "BG3"];
@@ -212,7 +215,7 @@ const parseLoosePlannerText = (text: string, plan: WarPlannerBGPlan): WarPlanner
   };
 };
 
-export default function WarPlannerPanel({ canEdit, planner, onChange }: Props) {
+export default function WarPlannerPanel({ canEdit, planner, onChange, onAiPlan, aiPlanError, isAiPlanning }: Props) {
   const activeBg = planner.selectedBg || "BG1";
   const activePlan = getWarPlannerBgPlan(planner, activeBg);
   const plan = useMemo(() => recommendWarPlan(planner, activeBg), [planner, activeBg]);
@@ -291,6 +294,27 @@ export default function WarPlannerPanel({ canEdit, planner, onChange }: Props) {
   const buildFromAiDraft = () => {
     if (!canEdit) return;
     const parsed = parseLoosePlannerText(aiDraft, activePlan);
+    setActivePlan({
+      ...parsed,
+      defenders: parsed.defenders.map((defender) => ({
+        ...defender,
+        tags: suggestDefenderTags(defender),
+      })),
+      attackers: parsed.attackers.map((attacker) => ({
+        ...attacker,
+        slots: attacker.slots.map((slot) => ({
+          ...slot,
+          tags: suggestSlotTags(slot, attacker),
+        })),
+      })),
+    });
+  };
+
+  const askFreeAi = async () => {
+    if (!canEdit || !onAiPlan || !aiDraft.trim()) return;
+    const plannerText = await onAiPlan(aiDraft, activeBg);
+    setAiDraft(plannerText);
+    const parsed = parseLoosePlannerText(plannerText, activePlan);
     setActivePlan({
       ...parsed,
       defenders: parsed.defenders.map((defender) => ({
@@ -479,9 +503,18 @@ export default function WarPlannerPanel({ canEdit, planner, onChange }: Props) {
           <div className="planner-ai-copy">
             <h3 className="planner-section-title">AI Assist</h3>
             <div className="planner-ai-actions">
+              <Button
+                type="button"
+                className="btn-primary planner-tool-btn"
+                onClick={() => void askFreeAi()}
+                disabled={!canEdit || !onAiPlan || !aiDraft.trim() || Boolean(isAiPlanning)}
+              >
+                <Wand2 aria-hidden="true" />
+                {isAiPlanning ? "Thinking..." : "Ask Free AI"}
+              </Button>
               <Button type="button" className="btn-primary planner-tool-btn" onClick={buildFromAiDraft} disabled={!canEdit || !aiDraft.trim()}>
                 <Wand2 aria-hidden="true" />
-                Build Plan
+                Build Local
               </Button>
               <Button type="button" className="btn-secondary planner-tool-btn" onClick={smartFill} disabled={!canEdit}>
                 <Sparkles aria-hidden="true" />
@@ -489,6 +522,7 @@ export default function WarPlannerPanel({ canEdit, planner, onChange }: Props) {
               </Button>
             </div>
           </div>
+          {aiPlanError && <div className="planner-ai-error">{aiPlanError}</div>}
           <textarea
             className="planner-ai-input"
             value={aiDraft}
