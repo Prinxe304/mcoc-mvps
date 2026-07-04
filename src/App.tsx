@@ -4,13 +4,34 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
+import ChallengesPanel from "./components/Challenges";
+import WarPlannerPanel from "./components/WarPlanner";
 import "./index.css";
+import {
+  appendChallengeLogEntry,
+  computeChallengeWinner,
+  normalizeChallenges,
+  type Challenge,
+} from "./lib/challenges";
+import { normalizeSeasonChampion, type SeasonChampion } from "./lib/seasonChampion";
+import {
+  createInitialWarPlannerState,
+  normalizeWarPlannerState,
+  type WarPlannerState,
+} from "./lib/warPlanner";
 
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 type BG = (typeof BG_NAMES)[number];
 
 const PLAYERS_PER_BG = 10;
-const TEST_WARS_TO_IGNORE = 8;
+const TEST_WARS_TO_IGNORE = Math.max(0, Number(import.meta.env.VITE_WARS_TO_IGNORE ?? 0));
+
+const DEFAULT_CLIENT_EDITOR_EMAILS = [
+  "yousefseepic@gmail.com",
+  "hhsawad@gmail.com",
+  "serwanmatti@gmail.com",
+  "princehirpara304@gmail.com",
+] as const;
 
 interface Player {
   name: string;
@@ -41,6 +62,9 @@ interface PersistedState {
   history: string[][];
   submittedMvps: SubmittedMvp[];
   seasonTracker: SeasonTracker;
+  challenges: Challenge[];
+  previousSeasonChampion: SeasonChampion | null;
+  warPlanner: WarPlannerState;
   bonusDraft: BonusCounts;
   bonusHistory: BonusCounts[];
   defenseDraft: DefenseCounts;
@@ -52,17 +76,15 @@ interface PersistedState {
 const STORAGE_KEY = "war-mvp-dashboard-state-v1";
 const ACTIVE_BG_STORAGE_KEY = "war-mvp-active-bg-v1";
 const ROOM_ID = (import.meta.env.VITE_ROOM_ID as string | undefined) || "global";
-const EDITOR_EMAILS = String(import.meta.env.VITE_EDITOR_EMAILS || "")
-  .split(",")
-  .map((email) => email.trim().toLowerCase())
-  .filter(Boolean);
 
 const getStateRef = "state:getState" as any;
+const getEditAccessRef = "state:getEditAccess" as any;
 const saveStateRef = "state:saveState" as any;
+const replaceStateRef = "state:replaceState" as any;
 const updatePlayerRef = "state:updatePlayer" as any;
 const updateBonusDraftRef = "state:updateBonusDraft" as any;
 const updateDefenseDraftRef = "state:updateDefenseDraft" as any;
-const resetStateRef = "state:resetState" as any;
+const DEFAULT_WAR_PLANNER_STATE = createInitialWarPlannerState();
 const GOD_GIF_URLS = [
   "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
   "https://media.giphy.com/media/l3q2XhfQ8oCkm1Ts4/giphy.gif",
@@ -97,11 +119,8 @@ const calculateKD = (kills: number, deaths: number): number => {
 };
 const calculateWarLeaderboardKD = (kills: number, deaths: number): number => calculateKD(kills, deaths);
 const calculateMainPlayerKDWithExtraPenalty = (kills: number, deaths: number): number => {
-  const safeKills = Math.max(0, Number(kills || 0));
-  const safeDeaths = Math.max(0, Number(deaths || 0));
-  if (safeKills === 0 && safeDeaths === 0) return 0;
-  const extraDeathPenalty = safeKills > 5 ? safeDeaths : 0;
-  return safeKills / (safeDeaths + extraDeathPenalty + 1);
+  // Simple KD (no extra "risk factor" penalty).
+  return calculateKD(kills, deaths);
 };
 
 const calculateSeasonKD = (kdSum: number, wars: number): number => {
@@ -109,6 +128,17 @@ const calculateSeasonKD = (kdSum: number, wars: number): number => {
   return kdSum / wars;
 };
 const capKdForDisplay = (value: number): number => Math.min(10, Math.max(0, Number(value || 0)));
+
+const calculateTrackingKdForName = (seasonTracker: SeasonTracker, name: string): number => {
+  const rawName = String(name || "").trim();
+  if (!rawName) return 0;
+  const key = rawName.toLowerCase();
+  const stats = seasonTracker?.[key];
+  const wars = Number((stats as any)?.wars || 0);
+  const countedWars = Math.max(0, wars - TEST_WARS_TO_IGNORE);
+  const kdSum = Number((stats as any)?.kdSum || 0);
+  return capKdForDisplay(calculateSeasonKD(kdSum, countedWars));
+};
 
 const calculateBackupWarScore = (kills: number, deaths: number): number => {
   const safeKills = Math.max(0, Number(kills || 0));
@@ -201,6 +231,9 @@ const normalizeSnapshot = (parsed: Partial<PersistedState> | null | undefined, f
     submittedMvps: Array.isArray(parsed.submittedMvps) ? parsed.submittedMvps : [],
     seasonTracker:
       parsed.seasonTracker && typeof parsed.seasonTracker === "object" ? (parsed.seasonTracker as SeasonTracker) : {},
+    challenges: normalizeChallenges((parsed as any).challenges),
+    previousSeasonChampion: normalizeSeasonChampion((parsed as any).previousSeasonChampion),
+    warPlanner: normalizeWarPlannerState((parsed as any).warPlanner),
     bonusDraft: normalizeBonusCounts(parsed.bonusDraft),
     bonusHistory: Array.isArray(parsed.bonusHistory) ? parsed.bonusHistory.map((row) => normalizeBonusCounts(row)) : [],
     defenseDraft: normalizeBonusCounts((parsed as any).defenseDraft),
@@ -228,27 +261,35 @@ export default function App() {
   const [activeBG, setActiveBG] = useState<BG>("BG1");
   const [showTracking, setShowTracking] = useState(false);
   const [showFun, setShowFun] = useState(false);
+  const [showChallenges, setShowChallenges] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [submittedMvps, setSubmittedMvps] = useState<SubmittedMvp[]>([]);
   const [seasonTracker, setSeasonTracker] = useState<SeasonTracker>({});
+  const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [previousSeasonChampion, setPreviousSeasonChampion] = useState<SeasonChampion | null>(null);
+  const [warPlanner, setWarPlanner] = useState<WarPlannerState>(DEFAULT_WAR_PLANNER_STATE);
   const [showAllKdPlayers, setShowAllKdPlayers] = useState(false);
   const [warFortune, setWarFortune] = useState("");
   const [rivalA, setRivalA] = useState("");
   const [rivalB, setRivalB] = useState("");
   const [showConfetti, setShowConfetti] = useState(false);
+  const [cloudSaveError, setCloudSaveError] = useState<string>("");
   const [bonusDraft, setBonusDraft] = useState<BonusCounts>(emptyBonusCounts());
   const [bonusHistory, setBonusHistory] = useState<BonusCounts[]>([]);
   const [defenseDraft, setDefenseDraft] = useState<DefenseCounts>(emptyDefenseCounts());
   const [defenseHistory, setDefenseHistory] = useState<DefenseCounts[]>([]);
   const [backupTracker, setBackupTracker] = useState<BackupTracker>(emptyBackupTracker());
   const [isHydrated, setIsHydrated] = useState(false);
+  const [showPlanner, setShowPlanner] = useState(false);
 
   const saveCloudState = useMutation(saveStateRef);
+  const replaceCloudState = useMutation(replaceStateRef);
   const updatePlayerCloud = useMutation(updatePlayerRef);
   const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
   const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
-  const resetCloudState = useMutation(resetStateRef);
+  // resetCloudState intentionally unused now; Clear Saved Data persists champion memory via saveState.
   const remoteState = useQuery(getStateRef, isSignedIn ? { roomId: ROOM_ID } : "skip");
+  const remoteAccess = useQuery(getEditAccessRef, isSignedIn ? {} : "skip");
   const convex = useConvex();
 
   const skipPersistOnceRef = useRef(false);
@@ -260,7 +301,19 @@ export default function App() {
   const currentUserEmail = (user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || "")
     .trim()
     .toLowerCase();
-  const canEdit = isSignedIn ? (EDITOR_EMAILS.length === 0 ? true : EDITOR_EMAILS.includes(currentUserEmail)) : false;
+  const clientEditorEmails = useMemo(() => {
+    const raw = (import.meta.env.VITE_EDITOR_EMAILS as string | undefined) || "";
+    const fromEnv = raw
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+
+    return Array.from(new Set<string>([...DEFAULT_CLIENT_EDITOR_EMAILS, ...fromEnv]));
+  }, []);
+
+  const canEditClient = Boolean(isSignedIn && currentUserEmail && clientEditorEmails.includes(currentUserEmail));
+  const canEditServer = Boolean(isSignedIn && remoteAccess && (remoteAccess as any).canEdit);
+  const canEdit = canEditServer || canEditClient;
 
   const playFx = (kind: "submit" | "god" | "fun") => {
     try {
@@ -293,6 +346,9 @@ export default function App() {
     setHistory(snapshot.history);
     setSubmittedMvps(snapshot.submittedMvps);
     setSeasonTracker(snapshot.seasonTracker || {});
+    setChallenges(snapshot.challenges || []);
+    setPreviousSeasonChampion(snapshot.previousSeasonChampion || null);
+    setWarPlanner(snapshot.warPlanner || DEFAULT_WAR_PLANNER_STATE);
     setBonusDraft(snapshot.bonusDraft || emptyBonusCounts());
     setBonusHistory(snapshot.bonusHistory || []);
     setDefenseDraft(snapshot.defenseDraft || emptyDefenseCounts());
@@ -403,6 +459,9 @@ export default function App() {
       history,
       submittedMvps,
       seasonTracker,
+      challenges,
+      previousSeasonChampion,
+      warPlanner,
       bonusDraft,
       bonusHistory,
       defenseDraft,
@@ -413,7 +472,21 @@ export default function App() {
 
     latestUpdatedAtRef.current = snapshot.updatedAt;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-  }, [isHydrated, data, history, submittedMvps, seasonTracker, bonusDraft, bonusHistory, defenseDraft, defenseHistory, backupTracker]);
+  }, [
+    isHydrated,
+    data,
+    history,
+    submittedMvps,
+    seasonTracker,
+    challenges,
+    previousSeasonChampion,
+    warPlanner,
+    bonusDraft,
+    bonusHistory,
+    defenseDraft,
+    defenseHistory,
+    backupTracker,
+  ]);
 
   useEffect(() => {
     try {
@@ -500,6 +573,19 @@ export default function App() {
     }
   };
 
+  const updateChallenges = (nextChallenges: Challenge[]) => {
+    if (!canEdit) return;
+    setChallenges(nextChallenges);
+    if (!isSignedIn) return;
+    const snapshot = buildSnapshot({ challenges: nextChallenges });
+    void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt })
+      .then(() => setCloudSaveError(""))
+      .catch((err: any) => {
+        const msg = String(err?.message || err || "Unknown error");
+        setCloudSaveError(msg);
+      });
+  };
+
   const buildSnapshot = (
     overrides: Partial<Omit<PersistedState, "updatedAt">> = {},
   ): PersistedState => {
@@ -508,6 +594,9 @@ export default function App() {
       history: overrides.history ?? history,
       submittedMvps: overrides.submittedMvps ?? submittedMvps,
       seasonTracker: overrides.seasonTracker ?? seasonTracker,
+      challenges: overrides.challenges ?? challenges,
+      previousSeasonChampion: overrides.previousSeasonChampion ?? previousSeasonChampion,
+      warPlanner: overrides.warPlanner ?? warPlanner,
       bonusDraft: overrides.bonusDraft ?? bonusDraft,
       bonusHistory: overrides.bonusHistory ?? bonusHistory,
       defenseDraft: overrides.defenseDraft ?? defenseDraft,
@@ -570,6 +659,7 @@ export default function App() {
     const nextDefenseDraft = emptyDefenseCounts();
     const nextSeasonTracker: SeasonTracker = { ...seasonTracker };
     const nextBackupTracker: BackupTracker = { ...backupTracker };
+    const nextHistoryLength = nextHistory.length;
 
     playFx("submit");
 
@@ -606,6 +696,18 @@ export default function App() {
       };
     });
 
+    const nextChallenges = challenges.map((challenge) => {
+      if (!challenge.active) return challenge;
+      const kdA = calculateTrackingKdForName(nextSeasonTracker, challenge.playerA);
+      const kdB = calculateTrackingKdForName(nextSeasonTracker, challenge.playerB);
+      return appendChallengeLogEntry(challenge, {
+        war: nextHistoryLength,
+        kdA,
+        kdB,
+        winner: computeChallengeWinner(kdA, kdB),
+      });
+    });
+
     setSubmittedMvps(nextSubmittedMvps);
     setHistory(nextHistory);
     setBonusHistory(nextBonusHistory);
@@ -614,12 +716,14 @@ export default function App() {
     setDefenseDraft(nextDefenseDraft);
     setSeasonTracker(nextSeasonTracker);
     setBackupTracker(nextBackupTracker);
+    setChallenges(nextChallenges);
 
     if (isSignedIn) {
       const snapshot = buildSnapshot({
         history: nextHistory,
         submittedMvps: nextSubmittedMvps,
         seasonTracker: nextSeasonTracker,
+        challenges: nextChallenges,
         bonusDraft: nextBonusDraft,
         bonusHistory: nextBonusHistory,
         defenseDraft: nextDefenseDraft,
@@ -654,12 +758,24 @@ export default function App() {
 
   const clearSavedData = () => {
     if (!canEdit) return;
+    const canArchiveChampion = seasonKdTable.length > 0 && Boolean(godOfBg?.name);
+    const champion = canArchiveChampion ? buildSeasonChampion() : previousSeasonChampion;
+
+    const confirmText =
+      canArchiveChampion && champion
+        ? `Clear saved data and start a new season?\n\nChampion saved as memory: ${champion.name}`
+        : "Clear saved data?\n\nThis will reset all saved state.";
+    if (!window.confirm(confirmText)) return;
+
     localStorage.removeItem(STORAGE_KEY);
     const resetSnapshot: PersistedState = {
       data: createInitialData(),
       history: [],
       submittedMvps: [],
       seasonTracker: {},
+      challenges: [],
+      previousSeasonChampion: champion ?? null,
+      warPlanner: DEFAULT_WAR_PLANNER_STATE,
       bonusDraft: emptyBonusCounts(),
       bonusHistory: [],
       defenseDraft: emptyDefenseCounts(),
@@ -671,8 +787,13 @@ export default function App() {
     applySnapshot(resetSnapshot);
     setActiveBG("BG1");
     localStorage.setItem(ACTIVE_BG_STORAGE_KEY, "BG1");
+    setShowFun(false);
+    setShowChallenges(false);
+    setShowPlanner(false);
+    setShowTracking(true);
     if (isSignedIn) {
-      void resetCloudState({ roomId: ROOM_ID });
+      // Hard-replace the server state so old season data can't merge back in.
+      void replaceCloudState({ roomId: ROOM_ID, state: resetSnapshot, updatedAt: resetSnapshot.updatedAt });
     }
   };
 
@@ -787,6 +908,23 @@ export default function App() {
     }).sort((a, b) => b.fairScore - a.fairScore);
   }, [backupTracker, data]);
 
+  const buildSeasonChampion = (): SeasonChampion | null => {
+    if (!godOfBg?.name) return null;
+    const champKey = godOfBg.name.trim().toLowerCase();
+    const stats = seasonTracker?.[champKey] as any;
+    const wars = Math.max(0, Number(stats?.wars || 0));
+    const countedWars = Math.max(0, wars - TEST_WARS_TO_IGNORE);
+    return {
+      name: godOfBg.name,
+      kd: Number(godOfBg.kd || 0),
+      kills: Number(godOfBg.kills || 0),
+      deaths: Number(godOfBg.deaths || 0),
+      countedWars,
+      totalWars: history.length,
+      endedAt: Date.now(),
+    };
+  };
+
   const bonusFrequency = useMemo(() => {
     const clownCounts = emptyBonusCounts();
     const saviourCounts = emptyBonusCounts();
@@ -886,9 +1024,9 @@ export default function App() {
       <SignedIn>
         <p className="sync-note">Sync mode: Convex realtime (room: {ROOM_ID})</p>
         {!canEdit && (
-          <p className="sync-note">
-            View only mode. Ask admin to allow your email: {currentUserEmail || "unknown"}
-          </p>
+          <div className="sync-note">
+            View only mode. Ask admin to allow your email: {currentUserEmail || (remoteAccess as any)?.email || "unknown"}
+          </div>
         )}
 
         <div className="tabs-wrap">
@@ -899,9 +1037,11 @@ export default function App() {
               onClick={() => {
                 setShowTracking(false);
                 setShowFun(false);
+                setShowChallenges(false);
+                setShowPlanner(false);
                 setActiveBG(bg);
               }}
-              className={`tab-btn ${!showTracking && !showFun && activeBG === bg ? "is-active" : ""}`}
+              className={`tab-btn ${!showTracking && !showFun && !showChallenges && !showPlanner && activeBG === bg ? "is-active" : ""}`}
             >
               {bg}
             </Button>
@@ -910,6 +1050,8 @@ export default function App() {
             type="button"
             onClick={() => {
               setShowFun(false);
+              setShowChallenges(false);
+              setShowPlanner(false);
               setShowTracking(true);
             }}
             className={`tab-btn ${showTracking ? "is-active" : ""}`}
@@ -920,15 +1062,43 @@ export default function App() {
             type="button"
             onClick={() => {
               setShowTracking(false);
+              setShowChallenges(false);
+              setShowPlanner(false);
               setShowFun(true);
             }}
             className={`tab-btn ${showFun ? "is-active" : ""}`}
           >
             Fun
           </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              setShowTracking(false);
+              setShowFun(false);
+              setShowChallenges(true);
+              setShowPlanner(false);
+            }}
+            className={`tab-btn ${showChallenges ? "is-active" : ""}`}
+          >
+            Challenges
+          </Button>
+          {canEdit && (
+            <Button
+              type="button"
+              onClick={() => {
+                setShowTracking(false);
+                setShowFun(false);
+                setShowChallenges(false);
+                setShowPlanner(true);
+              }}
+              className={`tab-btn ${showPlanner ? "is-active" : ""}`}
+            >
+              Planner
+            </Button>
+          )}
         </div>
 
-        {!showTracking && !showFun && (
+        {!showTracking && !showFun && !showChallenges && !showPlanner && (
           <>
             <Card className="card-main">
               <CardContent className="card-main-content">
@@ -952,6 +1122,7 @@ export default function App() {
                         className="input-player"
                         value={player.name}
                         disabled={!canEdit}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => updatePlayer(activeBG, i, "name", e.target.value)}
                         onBlur={() => syncPlayerName(activeBG, i)}
                       />
@@ -1054,9 +1225,11 @@ export default function App() {
                 </div>
               )}
 
-              <h2 className="section-title-left">
-                KD Awards ({history.length > 0 ? `War 1 to War ${history.length}` : "from first war"})
-              </h2>
+              <div className="kd-awards-head">
+                <h2 className="section-title-left">
+                  KD Awards ({history.length > 0 ? `War 1 to War ${history.length}` : "from first war"})
+                </h2>
+              </div>
               <div className="award-grid">
                 <div className="award-item god-item">
                   <img src={kdGodGifUrl} alt="God of BG gif" className="award-gif" />
@@ -1165,6 +1338,20 @@ export default function App() {
           </Card>
         )}
 
+        {showPlanner && canEdit && <WarPlannerPanel canEdit={canEdit} planner={warPlanner} onChange={setWarPlanner} />}
+
+        {showChallenges && (
+          <ChallengesPanel
+            canEdit={canEdit}
+            playerOptions={playerOptions}
+            challenges={challenges}
+            onChange={updateChallenges}
+            getKd={(name) => calculateTrackingKdForName(seasonTracker, name)}
+            onPlayFx={playFx}
+            cloudError={cloudSaveError}
+          />
+        )}
+
         {showFun && (
           <Card className="card-secondary card-awards">
             <CardContent className="card-secondary-content">
@@ -1239,7 +1426,7 @@ export default function App() {
           </Card>
         )}
 
-        {!showFun && submittedMvps.length > 0 && (
+        {!showFun && !showChallenges && !showPlanner && submittedMvps.length > 0 && (
           <Card className="card-secondary card-leaderboard">
             <CardContent className="card-secondary-content">
               <div className="leaderboard-head" onClick={() => setShowLeaderboard((prev) => !prev)}>
@@ -1274,7 +1461,7 @@ export default function App() {
           </Card>
         )}
 
-        {!showFun && (
+        {!showFun && !showChallenges && !showPlanner && (
           <Card className="card-secondary card-history">
             <CardContent className="card-secondary-content">
               <h2 className="section-title-left">War History</h2>

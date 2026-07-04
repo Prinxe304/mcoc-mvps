@@ -8,11 +8,22 @@ const ENV = ((globalThis as { process?: { env?: Record<string, string | undefine
   string | undefined
 >;
 
-const getAllowedEditorEmails = () =>
-  (ENV.EDITOR_EMAILS || "")
+const DEFAULT_EDITOR_EMAILS = [
+  "yousefseepic@gmail.com",
+  "hhsawad@gmail.com",
+  "serwanmatti@gmail.com",
+  "princehirpara304@gmail.com",
+];
+
+const getAllowedEditorEmails = () => {
+  const fromEnv = (ENV.EDITOR_EMAILS || "")
     .split(",")
     .map((email: string) => email.trim().toLowerCase())
     .filter(Boolean);
+
+  const merged = new Set<string>([...DEFAULT_EDITOR_EMAILS.map((e) => e.trim().toLowerCase()), ...fromEnv]);
+  return Array.from(merged).filter(Boolean);
+};
 
 const shouldEnforceServerEditorCheck = () =>
   String(ENV.ENFORCE_SERVER_EDITOR_CHECK || "").trim().toLowerCase() === "true";
@@ -30,6 +41,26 @@ const getIdentityEmail = (identity: any): string | null => {
   return raw.toLowerCase().trim();
 };
 
+const getEmailVariants = (raw: string): string[] => {
+  const email = raw.toLowerCase().trim();
+  if (!email || !email.includes("@")) return [];
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return [];
+  const variants = new Set<string>([`${local}@${domain}`]);
+
+  const plusIndex = local.indexOf("+");
+  if (plusIndex > 0) {
+    variants.add(`${local.slice(0, plusIndex)}@${domain}`);
+  }
+
+  if (domain === "googlemail.com") {
+    variants.add(`${local}@gmail.com`);
+    if (plusIndex > 0) variants.add(`${local.slice(0, plusIndex)}@gmail.com`);
+  }
+
+  return Array.from(variants);
+};
+
 const getIdentityCandidates = (identity: any): string[] => {
   const values = new Set<string>();
   const add = (val: unknown) => {
@@ -40,7 +71,8 @@ const getIdentityCandidates = (identity: any): string[] => {
     cleaned.split("|").map((part) => part.trim()).filter(Boolean).forEach((part) => values.add(part));
   };
 
-  add(getIdentityEmail(identity));
+  const email = getIdentityEmail(identity);
+  if (email) getEmailVariants(email).forEach((v) => add(v));
   add(identity?.subject);
   add(identity?.tokenIdentifier);
   add(identity?.claims?.sub);
@@ -86,8 +118,12 @@ const hasMeaningfulData = (state: any) => {
   const submittedMvpsLen = Array.isArray(state.submittedMvps) ? state.submittedMvps.length : 0;
   const seasonTrackerLen =
     state.seasonTracker && typeof state.seasonTracker === "object" ? Object.keys(state.seasonTracker).length : 0;
+  const challengesLen = Array.isArray(state.challenges) ? state.challenges.length : 0;
+  const hasChampion = Boolean(state.previousSeasonChampion && typeof state.previousSeasonChampion === "object");
   if (historyLen > 0 || bonusHistoryLen > 0 || defenseHistoryLen > 0 || submittedMvpsLen > 0 || seasonTrackerLen > 0)
     return true;
+  if (challengesLen > 0) return true;
+  if (hasChampion) return true;
 
   return BG_NAMES.some((bg) => {
     const rows = Array.isArray(state.data?.[bg]) ? state.data[bg] : [];
@@ -101,10 +137,14 @@ const isLikelyBootstrapSnapshot = (state: any) => {
   const bonusHistoryLen = Array.isArray(state.bonusHistory) ? state.bonusHistory.length : 0;
   const defenseHistoryLen = Array.isArray(state.defenseHistory) ? state.defenseHistory.length : 0;
   const submittedMvpsLen = Array.isArray(state.submittedMvps) ? state.submittedMvps.length : 0;
+  const challengesLen = Array.isArray(state.challenges) ? state.challenges.length : 0;
   const seasonTrackerLen =
     state.seasonTracker && typeof state.seasonTracker === "object" ? Object.keys(state.seasonTracker).length : 0;
+  const hasChampion = Boolean(state.previousSeasonChampion && typeof state.previousSeasonChampion === "object");
   if (historyLen > 0 || bonusHistoryLen > 0 || defenseHistoryLen > 0 || submittedMvpsLen > 0 || seasonTrackerLen > 0)
     return false;
+  if (challengesLen > 0) return false;
+  if (hasChampion) return false;
 
   return BG_NAMES.every((bg) => {
     const rows = Array.isArray(state.data?.[bg]) ? state.data[bg] : [];
@@ -157,6 +197,42 @@ const mergeState = (existingState: any, incomingState: any) => {
     };
   }
 
+  const mergeChallenges = (
+    existingList: any,
+    incomingList: any,
+    existingUpdatedAt: number,
+    incomingUpdatedAt: number,
+  ) => {
+    if (!Array.isArray(incomingList)) return Array.isArray(existingList) ? existingList : [];
+    const existing = Array.isArray(existingList) ? existingList : [];
+    const dedupe = (list: any[]) => {
+      const byId = new Map<string, any>();
+      list.forEach((row: any) => {
+        const id = String(row?.id || "").trim();
+        if (!id) return;
+        const current = byId.get(id);
+        if (!current) {
+          byId.set(id, row);
+          return;
+        }
+        const currentUpdatedAt = Number(current?.updatedAt || 0);
+        const rowUpdatedAt = Number(row?.updatedAt || 0);
+        byId.set(id, rowUpdatedAt >= currentUpdatedAt ? row : current);
+      });
+      return Array.from(byId.values()).sort((a: any, b: any) => Number(b?.updatedAt || 0) - Number(a?.updatedAt || 0));
+    };
+
+    // If the incoming snapshot is at least as new as the stored snapshot,
+    // treat it as the source of truth. This preserves deletions (a missing id
+    // means the client removed it).
+    if (incomingUpdatedAt >= existingUpdatedAt) {
+      return dedupe(incomingList);
+    }
+
+    // Otherwise, fall back to a union merge to avoid dropping newer server-side entries.
+    return dedupe([...existing, ...incomingList]);
+  };
+
   const existingHistory = Array.isArray(existingState.history) ? existingState.history : [];
   const incomingHistory = Array.isArray(incomingState.history) ? incomingState.history : [];
   const existingBonusHistory = Array.isArray(existingState.bonusHistory) ? existingState.bonusHistory : [];
@@ -171,6 +247,8 @@ const mergeState = (existingState: any, incomingState: any) => {
   const useIncomingMeta =
     incomingProgress > existingProgress || (incomingProgress === existingProgress && incomingUpdatedAt >= existingUpdatedAt);
 
+  const mergedChallenges = mergeChallenges(existingState?.challenges, incomingState?.challenges, existingUpdatedAt, incomingUpdatedAt);
+
   return {
     ...existingState,
     ...incomingState,
@@ -178,6 +256,10 @@ const mergeState = (existingState: any, incomingState: any) => {
     history: useIncomingMeta ? incomingHistory : existingHistory,
     submittedMvps: useIncomingMeta ? incomingState.submittedMvps ?? existingState.submittedMvps : existingState.submittedMvps,
     seasonTracker: useIncomingMeta ? incomingState.seasonTracker ?? existingState.seasonTracker : existingState.seasonTracker,
+    challenges: mergedChallenges,
+    previousSeasonChampion: useIncomingMeta
+      ? incomingState.previousSeasonChampion ?? existingState.previousSeasonChampion
+      : existingState.previousSeasonChampion,
     bonusDraft: useIncomingMeta ? incomingState.bonusDraft ?? existingState.bonusDraft : existingState.bonusDraft,
     bonusHistory: useIncomingMeta ? incomingBonusHistory : existingBonusHistory,
     defenseDraft: useIncomingMeta ? incomingState.defenseDraft ?? existingState.defenseDraft : existingState.defenseDraft,
@@ -201,6 +283,8 @@ const createInitialState = () => {
     history: [],
     submittedMvps: [],
     seasonTracker: {},
+    challenges: [],
+    previousSeasonChampion: null,
     bonusDraft: { BG1: 0, BG2: 0, BG3: 0 },
     bonusHistory: [],
     defenseDraft: { BG1: 0, BG2: 0, BG3: 0 },
@@ -269,6 +353,42 @@ export const saveState = mutation({
       roomId: args.roomId,
       state: args.state,
       updatedAt: args.updatedAt,
+      updatedBy: identity?.subject ?? "anonymous",
+    });
+  },
+});
+
+export const replaceState = mutation({
+  args: {
+    roomId: v.string(),
+    state: v.any(),
+    updatedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    requireEditor(identity);
+
+    const existing = await ctx.db
+      .query("warStates")
+      .withIndex("by_room_id", (q) => q.eq("roomId", args.roomId))
+      .unique();
+
+    const nextState = normalizeState(args.state ?? null);
+    const updatedAt = Math.max(Number(args.updatedAt || 0), Number(nextState.updatedAt || 0), Date.now());
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        state: { ...nextState, updatedAt },
+        updatedAt,
+        updatedBy: identity?.subject ?? "anonymous",
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("warStates", {
+      roomId: args.roomId,
+      state: { ...nextState, updatedAt },
+      updatedAt,
       updatedBy: identity?.subject ?? "anonymous",
     });
   },
