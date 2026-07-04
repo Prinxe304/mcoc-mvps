@@ -586,6 +586,19 @@ export default function App() {
       });
   };
 
+  const updateWarPlanner = (nextWarPlanner: WarPlannerState) => {
+    if (!canEdit) return;
+    setWarPlanner(nextWarPlanner);
+    if (!isSignedIn) return;
+    const snapshot = buildSnapshot({ warPlanner: nextWarPlanner });
+    void saveCloudState({ roomId: ROOM_ID, state: snapshot, updatedAt: snapshot.updatedAt })
+      .then(() => setCloudSaveError(""))
+      .catch((err: any) => {
+        const msg = String(err?.message || err || "Unknown error");
+        setCloudSaveError(msg);
+      });
+  };
+
   const buildSnapshot = (
     overrides: Partial<Omit<PersistedState, "updatedAt">> = {},
   ): PersistedState => {
@@ -1363,7 +1376,7 @@ export default function App() {
           </Card>
         )}
 
-        {showPlanner && canEdit && <WarPlannerPanel canEdit={canEdit} planner={warPlanner} onChange={setWarPlanner} />}
+        {showPlanner && canEdit && <WarPlannerPanel canEdit={canEdit} planner={warPlanner} onChange={updateWarPlanner} />}
 
         {showChallenges && (
           <ChallengesPanel
