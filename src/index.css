@@ -454,7 +454,7 @@ body {
 }
 
 .planner-support {
-  display: grid;
+  display: none;
   gap: 10px;
   margin-bottom: 14px;
   padding: 12px;
@@ -547,6 +547,10 @@ body {
   gap: 14px;
 }
 
+.planner-clean-grid {
+  align-items: start;
+}
+
 .planner-panel {
   border-radius: 16px;
   border: 1px solid rgba(203, 213, 225, 0.9);
@@ -579,9 +583,159 @@ body {
 
 .planner-row {
   padding: 10px;
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid rgba(209, 213, 219, 0.9);
   background: linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.9));
+}
+
+.planner-roster-row {
+  display: grid;
+  gap: 8px;
+}
+
+.planner-roster-input {
+  width: 100%;
+  min-height: 82px;
+  resize: vertical;
+  border: 1px solid #cdd5e0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1e293b;
+  padding: 10px;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.planner-player-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.planner-player-plan-card {
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.planner-player-plan-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.planner-player-plan-head span,
+.planner-roster-preview,
+.planner-muted {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.planner-roster-preview {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-player-fights {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.planner-fight-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+  gap: 8px;
+  align-items: center;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  padding: 7px 8px;
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.planner-fight-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-fight-row strong {
+  color: #1d4ed8;
+  text-align: right;
+}
+
+.planner-tile-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) minmax(140px, auto);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(209, 213, 219, 0.9);
+  background: #f8fafc;
+}
+
+.planner-tile-row.is-assigned {
+  border-color: rgba(37, 99, 235, 0.24);
+  background: #eef5ff;
+}
+
+.planner-tile-meta {
+  display: grid;
+  gap: 2px;
+}
+
+.planner-tile-meta strong {
+  color: #1d4ed8;
+  font-size: 0.9rem;
+}
+
+.planner-tile-meta span,
+.planner-tile-node span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.planner-tile-body {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.9fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.planner-tile-node {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.planner-tile-node strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.planner-tile-node span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-tile-best {
+  color: #1d4ed8;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-align: right;
 }
 
 .planner-node-row {
@@ -1165,6 +1319,18 @@ body {
 
   .planner-slot-grid {
     grid-template-columns: 1fr;
+  }
+
+  .planner-player-plan-grid,
+  .planner-tile-row,
+  .planner-tile-body,
+  .planner-fight-row {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-tile-best,
+  .planner-fight-row strong {
+    text-align: left;
   }
 
   .planner-toggle {

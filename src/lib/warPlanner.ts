@@ -21,6 +21,7 @@ export interface WarPlannerAttackerSlot {
 export interface WarPlannerAttackerRow {
   id: string;
   name: string;
+  roster: string;
   tags: string;
   notes: string;
   prefightSupport: boolean;
@@ -66,6 +67,7 @@ export interface WarPlannerMatchup {
   defenderIndex: number;
   attackerIndex: number;
   slotIndex: number;
+  rosterChampionIndex: number;
   defender: WarPlannerDefender;
   attacker: WarPlannerAttackerRow;
   slot: WarPlannerAttackerSlot;
@@ -276,6 +278,7 @@ const createEmptySlot = (index: number): WarPlannerAttackerSlot => ({
 const createEmptyAttacker = (index: number): WarPlannerAttackerRow => ({
   id: makeId("atk", index),
   name: "",
+  roster: "",
   tags: "",
   notes: "",
   prefightSupport: false,
@@ -337,6 +340,7 @@ const normalizeAttacker = (value: unknown, index: number): WarPlannerAttackerRow
   return {
     id: typeof row.id === "string" && row.id ? row.id : makeId("atk", index),
     name: typeof row.name === "string" ? row.name : "",
+    roster: typeof (row as any).roster === "string" ? (row as any).roster : "",
     tags: typeof row.tags === "string" ? row.tags : "",
     notes: typeof row.notes === "string" ? row.notes : "",
     prefightSupport: Boolean(row.prefightSupport),
@@ -437,6 +441,14 @@ export const suggestDefenderTags = (defender: WarPlannerDefender): string => {
 
 export const suggestSlotTags = (slot: WarPlannerAttackerSlot, attacker?: WarPlannerAttackerRow): string =>
   joinTags(slot.tags, inferTagsFromChampion(slot.name), attacker?.tags ?? "", attacker?.notes ?? "", slot.notes);
+
+export const splitRosterChampions = (value: string): string[] =>
+  unique(
+    String(value || "")
+      .split(/[,;/|+\n]+/g)
+      .map((champ) => champ.trim())
+      .filter(Boolean),
+  );
 
 const formatReasons = (reasons: string[]): string[] => unique(reasons).slice(0, 6);
 
@@ -564,15 +576,27 @@ const evaluateMatchup = (
   return { score, reasons: formatReasons(reasons) };
 };
 
-const buildRealSlots = (attackers: WarPlannerAttackerRow[]) =>
-  attackers.flatMap((attacker, attackerIndex) =>
-    attacker.slots.map((slot, slotIndex) => ({
-      attackerIndex,
-      slotIndex,
-      attacker,
-      slot,
-    })),
-  );
+const buildRosterSlots = (attackers: WarPlannerAttackerRow[]) =>
+  attackers.flatMap((attacker, attackerIndex) => {
+    const rosterChampions = splitRosterChampions(attacker.roster);
+    const manualSlots = attacker.slots.map((slot) => slot.name.trim()).filter(Boolean);
+    const champs = unique(rosterChampions.length > 0 ? rosterChampions : manualSlots);
+    return champs.map((champion, rosterChampionIndex) => {
+      const manualSlot = attacker.slots.find((slot) => normalizeText(slot.name) === normalizeText(champion));
+      return {
+        attackerIndex,
+        slotIndex: rosterChampionIndex,
+        rosterChampionIndex,
+        attacker,
+        slot: {
+          id: `${attacker.id}-roster-${rosterChampionIndex + 1}`,
+          name: champion,
+          tags: manualSlot?.tags || joinTags(inferTagsFromChampion(champion), attacker.tags),
+          notes: manualSlot?.notes || "",
+        } satisfies WarPlannerAttackerSlot,
+      };
+    });
+  });
 
 export const recommendWarPlan = (
   state: WarPlannerState,
@@ -585,15 +609,16 @@ export const recommendWarPlan = (
 } => {
   const normalized = normalizeWarPlannerState(state);
   const plan = normalized.bgPlans[bg];
-  const realSlots = buildRealSlots(plan.attackers).filter(({ slot }) => normalizeText(slot.name));
+  const realSlots = buildRosterSlots(plan.attackers).filter(({ slot }) => normalizeText(slot.name));
 
   const pairings = plan.defenders.flatMap((defender, defenderIndex) =>
-    realSlots.map(({ attackerIndex, slotIndex, attacker, slot }) => {
+    realSlots.map(({ attackerIndex, slotIndex, rosterChampionIndex, attacker, slot }) => {
       const evaluation = evaluateMatchup(defender, attacker, slot, plan.support);
       return {
         defenderIndex,
         attackerIndex,
         slotIndex,
+        rosterChampionIndex,
         defender,
         attacker,
         slot,
@@ -619,15 +644,18 @@ export const recommendWarPlan = (
   });
 
   const usedDefenders = new Set<number>();
-  const usedSlots = new Set<string>();
+  const usedPlayerChampions = new Set<string>();
+  const playerFightCounts = new Map<number, number>();
   const assignments: WarPlannerMatchup[] = [];
 
   sortedPairs.forEach((pairing) => {
     if (pairing.score <= 0) return;
-    const slotKey = `${pairing.attackerIndex}-${pairing.slotIndex}`;
-    if (usedDefenders.has(pairing.defenderIndex) || usedSlots.has(slotKey)) return;
+    const championKey = `${pairing.attackerIndex}-${normalizeText(pairing.slot.name)}`;
+    const currentPlayerFights = playerFightCounts.get(pairing.attackerIndex) ?? 0;
+    if (usedDefenders.has(pairing.defenderIndex) || usedPlayerChampions.has(championKey) || currentPlayerFights >= SLOT_COUNT) return;
     usedDefenders.add(pairing.defenderIndex);
-    usedSlots.add(slotKey);
+    usedPlayerChampions.add(championKey);
+    playerFightCounts.set(pairing.attackerIndex, currentPlayerFights + 1);
     assignments.push(pairing);
   });
 
@@ -643,9 +671,9 @@ export const recommendWarPlan = (
     };
   });
 
-  const unmatchedSlots = buildRealSlots(plan.attackers)
+  const unmatchedSlots = buildRosterSlots(plan.attackers)
     .filter(({ slot }) => normalizeText(slot.name))
-    .filter(({ attackerIndex, slotIndex }) => !usedSlots.has(`${attackerIndex}-${slotIndex}`));
+    .filter(({ attackerIndex, slot }) => !usedPlayerChampions.has(`${attackerIndex}-${normalizeText(slot.name)}`));
 
   return {
     bg,

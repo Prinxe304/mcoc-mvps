@@ -51,8 +51,8 @@ export const planWar = action({
       "1 Defender Name",
       "2 Defender Name",
       "",
-      "Attackers",
-      "Player Name: Champ 1, Champ 2, Champ 3",
+      "Rosters",
+      "Player Name: Champ 1, Champ 2, Champ 3, Champ 4, Champ 5",
       "If a node number is present, keep it. If player names are present, keep them.",
       "Do not invent attackers or defenders that are not implied by the user's notes.",
     ].join("\n");
