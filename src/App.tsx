@@ -522,19 +522,6 @@ export default function App() {
     }, 350);
   };
 
-  const syncPlayerName = (bg: BG, index: number) => {
-    if (!isSignedIn || !canEdit) return;
-    const timerKey = `${bg}-${index}`;
-    const prevTimer = pendingNameSyncRef.current[timerKey];
-    if (prevTimer) {
-      window.clearTimeout(prevTimer);
-      delete pendingNameSyncRef.current[timerKey];
-    }
-    const player = data[bg]?.[index];
-    if (!player) return;
-    void updatePlayerCloud({ roomId: ROOM_ID, bg, index, player: { ...player, updatedAt: Date.now() } });
-  };
-
   const updateBonusCount = (bg: BG, value: string) => {
     if (!canEdit) return;
     const parsed = value === "" ? 0 : Number(value);
@@ -1068,7 +1055,7 @@ export default function App() {
               <CardContent className="card-main-content">
                 <h2 className="section-title">{activeBG}</h2>
                 <div className="table-head">
-                  <div>Player</div>
+                  <div>Slot</div>
                   <div>Kills</div>
                   <div>Deaths</div>
                   <div>KD</div>
@@ -1082,14 +1069,9 @@ export default function App() {
                   const isMVP = activeMVP?.name === player.name;
                   return (
                     <div key={`${activeBG}-${i}`} className={`player-row ${isMVP ? "is-mvp" : ""}`}>
-                      <Input
-                        className="input-player"
-                        value={player.name}
-                        disabled={!canEdit}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) => updatePlayer(activeBG, i, "name", e.target.value)}
-                        onBlur={() => syncPlayerName(activeBG, i)}
-                      />
+                      <div className="input-player player-slot" aria-label={`Hidden player slot ${i + 1}`}>
+                        Slot {i + 1}
+                      </div>
                       <Input
                         type="number"
                         className="input-num"
