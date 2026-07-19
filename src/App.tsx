@@ -234,7 +234,6 @@ export default function App() {
   const [activeBG, setActiveBG] = useState<BG>("BG1");
   const [showFun, setShowFun] = useState(false);
   const [showChallenges, setShowChallenges] = useState(false);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [submittedMvps, setSubmittedMvps] = useState<SubmittedMvp[]>([]);
   const [seasonTracker, setSeasonTracker] = useState<SeasonTracker>({});
   const [challenges, setChallenges] = useState<Challenge[]>([]);
@@ -737,38 +736,6 @@ export default function App() {
   }, [data]);
 
   const kdListSource = seasonKdTable.length > 0 ? seasonKdTable : fallbackKdTable;
-  const seasonLeaderboard = useMemo(() => {
-    const count: Record<string, number> = {};
-    const allNames = new Set<string>();
-
-    BG_NAMES.forEach((bg) => {
-      data[bg].forEach((player, i) => {
-        if (i === PLAYERS_PER_BG - 1) return;
-        const name = player.name.trim();
-        if (!name) return;
-        allNames.add(name);
-      });
-    });
-
-    Object.entries(seasonTracker).forEach(([key, stats]) => {
-      const name = ((stats as any).name as string | undefined)?.trim() || key;
-      if (!name) return;
-      if (backupPlayerNames.has(name.toLowerCase())) return;
-      allNames.add(name);
-    });
-
-    allNames.forEach((name) => {
-      count[name] = 0;
-    });
-
-    history.slice(TEST_WARS_TO_IGNORE).flat().forEach((name) => {
-      if (!name) return;
-      if (!(name in count)) count[name] = 0;
-      count[name] = (count[name] || 0) + 1;
-    });
-    return Object.entries(count).sort((a, b) => (b[1] === a[1] ? a[0].localeCompare(b[0]) : b[1] - a[1]));
-  }, [history, data, seasonTracker, backupPlayerNames]);
-  const topThreeSeasonMvps = seasonLeaderboard.slice(0, 3);
   const godOfBg = seasonKdTable[0] ?? null;
   const playerOptions = kdListSource.map((p) => p.name);
 
@@ -1062,61 +1029,6 @@ export default function App() {
           </Card>
         )}
 
-        {!showFun && !showChallenges && submittedMvps.length > 0 && (
-          <Card className="card-secondary card-leaderboard">
-            <CardContent className="card-secondary-content">
-              <div className="leaderboard-head" onClick={() => setShowLeaderboard((prev) => !prev)}>
-                <h2 className="section-title-left">Season Leaderboard</h2>
-                <span className="chevron">{showLeaderboard ? "▲" : "▼"}</span>
-              </div>
-              {showLeaderboard && (
-                <div className="leaderboard-list">
-                  {seasonLeaderboard.map((p, i) => (
-                    <div key={p[0]} className={`leader-row ${i === 0 ? "leader-top" : ""}`}>
-                      <span>
-                        {i + 1}. {p[0]}
-                      </span>
-                      <span>{p[1]} MVPs</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {!showLeaderboard && topThreeSeasonMvps.length > 0 && (
-                <div className="leaderboard-list">
-                  {topThreeSeasonMvps.map((p, i) => (
-                    <div key={`top3-${p[0]}`} className={`leader-row ${i === 0 ? "leader-top" : ""}`}>
-                      <span>
-                        {i + 1}. {p[0]}
-                      </span>
-                      <span>{p[1]} MVPs</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {!showFun && !showChallenges && (
-          <Card className="card-secondary card-history">
-            <CardContent className="card-secondary-content">
-              <h2 className="section-title-left">War History</h2>
-              {history.map((war, i) => (
-                <div key={`war-${i}`} className="history-card">
-                  <div className="history-head">
-                    <span className="history-war">War {i + 1}</span>
-                    <span className="history-meta">{war.length} MVPs</span>
-                  </div>
-                  {war.map((player, idx) => (
-                    <div key={`${i}-${idx}-${player}`} className="history-item">
-                      {idx + 1}. {player}
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
       </SignedIn>
     </div>
   );
