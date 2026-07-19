@@ -76,16 +76,6 @@ const saveStateRef = "state:saveState" as any;
 const replaceStateRef = "state:replaceState" as any;
 const updateBonusDraftRef = "state:updateBonusDraft" as any;
 const updateDefenseDraftRef = "state:updateDefenseDraft" as any;
-const GOD_GIF_URLS = [
-  "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
-  "https://media.giphy.com/media/l3q2XhfQ8oCkm1Ts4/giphy.gif",
-  "https://media.giphy.com/media/26gsjCZpPolPr3sBy/giphy.gif",
-];
-const LOSER_GIF_URLS = [
-  "https://media.giphy.com/media/9Y5BbDSkSTiY8/giphy.gif",
-  "https://media.giphy.com/media/mCRJDo24UvJMA/giphy.gif",
-  "https://media.giphy.com/media/OPU6wzx8JrHna/giphy.gif",
-];
 const CLOWN_GIF_URLS = [
   "https://media.giphy.com/media/l378giAZgxPw3eO52/giphy.gif",
   "https://media.giphy.com/media/3o6ZtaO9BZHcOjmErm/giphy.gif",
@@ -95,13 +85,6 @@ const SAVIOUR_GIF_URLS = [
   "https://media.giphy.com/media/l4FGpP4lxGGgK5CBW/giphy.gif",
   "https://media.giphy.com/media/26gsjCZpPolPr3sBy/giphy.gif",
   "https://media.giphy.com/media/3oz8xAFtqoOUUrsh7W/giphy.gif",
-];
-const WAR_FORTUNES = [
-  "Your BG has main-character energy tonight.",
-  "Calm hands win chaotic wars.",
-  "One smart fight flips the whole map.",
-  "Trust the plan, finish the push.",
-  "MVPs are built in the small moments.",
 ];
 
 const calculateKD = (kills: number, deaths: number): number => {
@@ -249,7 +232,6 @@ export default function App() {
   const [data, setData] = useState<Data>(createInitialData());
   const [history, setHistory] = useState<string[][]>([]);
   const [activeBG, setActiveBG] = useState<BG>("BG1");
-  const [showTracking, setShowTracking] = useState(false);
   const [showFun, setShowFun] = useState(false);
   const [showChallenges, setShowChallenges] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -257,11 +239,6 @@ export default function App() {
   const [seasonTracker, setSeasonTracker] = useState<SeasonTracker>({});
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [previousSeasonChampion, setPreviousSeasonChampion] = useState<SeasonChampion | null>(null);
-  const [showAllKdPlayers, setShowAllKdPlayers] = useState(false);
-  const [warFortune, setWarFortune] = useState("");
-  const [rivalA, setRivalA] = useState("");
-  const [rivalB, setRivalB] = useState("");
-  const [showConfetti, setShowConfetti] = useState(false);
   const [cloudSaveError, setCloudSaveError] = useState<string>("");
   const [bonusDraft, setBonusDraft] = useState<BonusCounts>(emptyBonusCounts());
   const [bonusHistory, setBonusHistory] = useState<BonusCounts[]>([]);
@@ -281,7 +258,6 @@ export default function App() {
 
   const skipPersistOnceRef = useRef(false);
   const latestUpdatedAtRef = useRef(0);
-  const previousGodRef = useRef<string>("");
   const hasAppliedRemoteOnceRef = useRef(false);
   const backupMigrationDoneRef = useRef(false);
   const currentUserEmail = (user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || "")
@@ -710,7 +686,6 @@ export default function App() {
     localStorage.setItem(ACTIVE_BG_STORAGE_KEY, "BG1");
     setShowFun(false);
     setShowChallenges(false);
-    setShowTracking(true);
     if (isSignedIn) {
       // Hard-replace the server state so old season data can't merge back in.
       void replaceCloudState({ roomId: ROOM_ID, state: resetSnapshot, updatedAt: resetSnapshot.updatedAt });
@@ -795,38 +770,7 @@ export default function App() {
   }, [history, data, seasonTracker, backupPlayerNames]);
   const topThreeSeasonMvps = seasonLeaderboard.slice(0, 3);
   const godOfBg = seasonKdTable[0] ?? null;
-  const loserBracket = seasonKdTable.length > 1 ? seasonKdTable[seasonKdTable.length - 1] : null;
-  const visibleSeasonKdRows = showAllKdPlayers ? kdListSource : kdListSource.slice(0, 5);
   const playerOptions = kdListSource.map((p) => p.name);
-  const totalTrackedPlayers = BG_NAMES.length * (PLAYERS_PER_BG - 1);
-  const rivalryAStats = seasonKdTable.find((p) => p.name === rivalA) ?? null;
-  const rivalryBStats = seasonKdTable.find((p) => p.name === rivalB) ?? null;
-  const rivalryWinner =
-    rivalryAStats && rivalryBStats
-      ? rivalryAStats.kd === rivalryBStats.kd
-        ? "Draw"
-        : rivalryAStats.kd > rivalryBStats.kd
-          ? rivalryAStats.name
-          : rivalryBStats.name
-      : null;
-  const backupMvpRows = useMemo(() => {
-    return BG_NAMES.map((bg) => {
-      const stats = backupTracker[bg] || emptyBackupTracker()[bg];
-      const liveName = data[bg]?.[PLAYERS_PER_BG - 1]?.name?.trim();
-      const wars = Number(stats.wars || 0);
-      const kd = wars > 0 ? calculateSeasonKD(Number(stats.kdSum || 0), wars) : 0;
-      const fairScore = wars > 0 ? Number(stats.fairScoreSum || 0) / wars : 0;
-      return {
-        bg,
-        name: String(liveName || stats.name || `${bg}-Player8`),
-        kills: Number(stats.kills || 0),
-        deaths: Number(stats.deaths || 0),
-        kd,
-        fairScore,
-        wars,
-      };
-    }).sort((a, b) => b.fairScore - a.fairScore);
-  }, [backupTracker, data]);
 
   const buildSeasonChampion = (): SeasonChampion | null => {
     if (!godOfBg?.name) return null;
@@ -887,32 +831,12 @@ export default function App() {
     return BG_NAMES.filter((bg) => bonusFrequency.saviourCounts[bg] === bonusStrongest.count);
   }, [bonusStrongest, bonusFrequency]);
   const latestWarNumber = bonusHistory.length;
-  const kdGodGifUrl =
-    GOD_GIF_URLS[(Math.max(latestWarNumber, 1) - 1) % GOD_GIF_URLS.length];
-  const kdLoserGifUrl =
-    LOSER_GIF_URLS[(Math.max(latestWarNumber, 1) - 1) % LOSER_GIF_URLS.length];
   const clownMemeUrl =
     CLOWN_GIF_URLS[(Math.max(latestWarNumber, 1) - 1) % CLOWN_GIF_URLS.length];
   const saviourMemeUrl =
     SAVIOUR_GIF_URLS[(Math.max(latestWarNumber, 1) - 1) % SAVIOUR_GIF_URLS.length];
   const latestBonus = bonusHistory.length > 0 ? bonusHistory[bonusHistory.length - 1] : emptyBonusCounts();
   const latestDefense = defenseHistory.length > 0 ? defenseHistory[defenseHistory.length - 1] : emptyDefenseCounts();
-
-  useEffect(() => {
-    const nextGod = godOfBg?.name || "";
-    if (!nextGod) return;
-    if (!previousGodRef.current) {
-      previousGodRef.current = nextGod;
-      return;
-    }
-    if (previousGodRef.current !== nextGod) {
-      previousGodRef.current = nextGod;
-      setShowConfetti(true);
-      playFx("god");
-      const timer = window.setTimeout(() => setShowConfetti(false), 2200);
-      return () => window.clearTimeout(timer);
-    }
-  }, [godOfBg?.name]);
 
   if (!isAuthLoaded) return <div className="app-shell">Loading authentication...</div>;
 
@@ -954,12 +878,11 @@ export default function App() {
               key={bg}
               type="button"
               onClick={() => {
-                setShowTracking(false);
                 setShowFun(false);
                 setShowChallenges(false);
                 setActiveBG(bg);
               }}
-              className={`tab-btn ${!showTracking && !showFun && !showChallenges && activeBG === bg ? "is-active" : ""}`}
+              className={`tab-btn ${!showFun && !showChallenges && activeBG === bg ? "is-active" : ""}`}
             >
               {bg}
             </Button>
@@ -967,18 +890,6 @@ export default function App() {
           <Button
             type="button"
             onClick={() => {
-              setShowFun(false);
-              setShowChallenges(false);
-              setShowTracking(true);
-            }}
-            className={`tab-btn ${showTracking ? "is-active" : ""}`}
-          >
-            Tracking
-          </Button>
-          <Button
-            type="button"
-            onClick={() => {
-              setShowTracking(false);
               setShowChallenges(false);
               setShowFun(true);
             }}
@@ -989,7 +900,6 @@ export default function App() {
           <Button
             type="button"
             onClick={() => {
-              setShowTracking(false);
               setShowFun(false);
               setShowChallenges(true);
             }}
@@ -999,7 +909,7 @@ export default function App() {
           </Button>
         </div>
 
-        {!showTracking && !showFun && !showChallenges && (
+        {!showFun && !showChallenges && (
           <>
             <Card className="card-main">
               <CardContent className="card-main-content">
@@ -1064,130 +974,6 @@ export default function App() {
               </Button>
             </div>
           </>
-        )}
-
-        {showTracking && (
-          <Card className="card-secondary card-awards">
-            <CardContent className="card-secondary-content">
-              {showConfetti && (
-                <div className="confetti-wrap" aria-hidden="true">
-                  {Array.from({ length: 22 }).map((_, i) => (
-                    <span key={i} className="confetti-bit" style={{ left: `${(i * 100) / 22}%` }} />
-                  ))}
-                </div>
-              )}
-
-              <div className="kd-awards-head">
-                <h2 className="section-title-left">
-                  KD Awards ({history.length > 0 ? `War 1 to War ${history.length}` : "from first war"})
-                </h2>
-              </div>
-              <div className="award-grid">
-                <div className="award-item god-item">
-                  <img src={kdGodGifUrl} alt="God of BG gif" className="award-gif" />
-                  <div className="award-label">God of BG</div>
-                  <div className="award-name">{godOfBg ? godOfBg.name : "-"}</div>
-                  <div className="award-meta">KD {godOfBg ? godOfBg.kd.toFixed(2) : "0.00"}</div>
-                </div>
-
-                <div className="award-item loser-item">
-                  <img src={kdLoserGifUrl} alt="Loser bracket gif" className="award-gif" />
-                  <div className="award-label">Loser Bracket</div>
-                  <div className="award-name">{loserBracket ? loserBracket.name : "-"}</div>
-                  <div className="award-meta">KD {loserBracket ? loserBracket.kd.toFixed(2) : "0.00"}</div>
-                </div>
-              </div>
-
-              {seasonKdTable.length === 0 && <p className="sync-note">Submit your first war to start KD tracking.</p>}
-              <div className="kd-track-list">
-                {visibleSeasonKdRows.map((row, i) => (
-                  <div key={row.name} className="kd-track-row">
-                    <span>
-                      {i + 1}. {row.name}
-                    </span>
-                    <span>KD {row.kd.toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-              {kdListSource.length > 5 && (
-                <div className="kd-toggle-wrap">
-                  <Button
-                    type="button"
-                    className="btn-secondary kd-toggle-btn"
-                    onClick={() => setShowAllKdPlayers((prev) => !prev)}
-                  >
-                    {showAllKdPlayers ? "Show Top 5" : `Show All ${totalTrackedPlayers}`}
-                  </Button>
-                </div>
-              )}
-
-              <div className="track-section">
-                <h3 className="track-title">Backup MVP (last slot only)</h3>
-                <div className="kd-track-list">
-                  {backupMvpRows.map((row, i) => (
-                    <div key={`backup-${row.bg}`} className="kd-track-row">
-                      <span>
-                        {i + 1}. {row.bg} - {row.name}
-                      </span>
-                      <span>
-                        Score {row.fairScore.toFixed(2)} | KD {row.kd.toFixed(2)} | K {row.kills} D {row.deaths}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="track-section">
-                <h3 className="track-title">War Fortune</h3>
-                <div className="meme-row">
-                  <Button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setWarFortune(WAR_FORTUNES[Math.floor(Math.random() * WAR_FORTUNES.length)]);
-                      playFx("fun");
-                    }}
-                  >
-                    Reveal War Fortune
-                  </Button>
-                </div>
-                {warFortune && <div className="fortune-card">{warFortune}</div>}
-              </div>
-
-              <div className="track-section">
-                <h3 className="track-title">Rivalry Tracker</h3>
-                <div className="rival-row">
-                  <select className="rival-select" value={rivalA} onChange={(e) => setRivalA(e.target.value)}>
-                    <option value="">Select Player A</option>
-                    {playerOptions.map((name) => (
-                      <option key={`a-${name}`} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                  <select className="rival-select" value={rivalB} onChange={(e) => setRivalB(e.target.value)}>
-                    <option value="">Select Player B</option>
-                    {playerOptions.map((name) => (
-                      <option key={`b-${name}`} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {rivalryAStats && rivalryBStats && (
-                  <div className="rival-result">
-                    <span>
-                      {rivalryAStats.name}: KD {rivalryAStats.kd.toFixed(2)}
-                    </span>
-                    <span>
-                      {rivalryBStats.name}: KD {rivalryBStats.kd.toFixed(2)}
-                    </span>
-                    <span className="rival-winner">Winner: {rivalryWinner}</span>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
         )}
 
         {showChallenges && (
