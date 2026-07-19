@@ -74,7 +74,6 @@ const getStateRef = "state:getState" as any;
 const getEditAccessRef = "state:getEditAccess" as any;
 const saveStateRef = "state:saveState" as any;
 const replaceStateRef = "state:replaceState" as any;
-const updatePlayerRef = "state:updatePlayer" as any;
 const updateBonusDraftRef = "state:updateBonusDraft" as any;
 const updateDefenseDraftRef = "state:updateDefenseDraft" as any;
 const GOD_GIF_URLS = [
@@ -273,7 +272,6 @@ export default function App() {
 
   const saveCloudState = useMutation(saveStateRef);
   const replaceCloudState = useMutation(replaceStateRef);
-  const updatePlayerCloud = useMutation(updatePlayerRef);
   const updateBonusDraftCloud = useMutation(updateBonusDraftRef);
   const updateDefenseDraftCloud = useMutation(updateDefenseDraftRef);
   // resetCloudState intentionally unused now; Clear Saved Data persists champion memory via saveState.
@@ -285,7 +283,6 @@ export default function App() {
   const latestUpdatedAtRef = useRef(0);
   const previousGodRef = useRef<string>("");
   const hasAppliedRemoteOnceRef = useRef(false);
-  const pendingNameSyncRef = useRef<Record<string, number>>({});
   const backupMigrationDoneRef = useRef(false);
   const currentUserEmail = (user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || "")
     .trim()
@@ -428,13 +425,6 @@ export default function App() {
   }, [isSignedIn]);
 
   useEffect(() => {
-    return () => {
-      Object.values(pendingNameSyncRef.current).forEach((timerId) => window.clearTimeout(timerId));
-      pendingNameSyncRef.current = {};
-    };
-  }, []);
-
-  useEffect(() => {
     if (!isHydrated) return;
 
     if (skipPersistOnceRef.current) {
@@ -481,46 +471,6 @@ export default function App() {
       // Ignore local UI preference write errors.
     }
   }, [activeBG]);
-
-  const updatePlayer = (bg: BG, index: number, field: keyof Player, value: string | number) => {
-    if (!canEdit) return;
-    const current = data[bg]?.[index] ?? { name: `${bg}-Player${index + 1}`, kills: 0, deaths: 0, updatedAt: 0 };
-    const updatedAt = Date.now();
-    const nextPlayer: Player = {
-      ...current,
-      [field]: field === "name" ? String(value) : Number(value),
-      updatedAt,
-    };
-
-    setData((prev) => {
-      const newData = { ...prev };
-      newData[bg] = newData[bg].map((player, i) => {
-        if (i !== index) return player;
-        return nextPlayer;
-      });
-      return newData;
-    });
-
-    if (!isSignedIn) return;
-
-    if (field !== "name") {
-      void updatePlayerCloud({ roomId: ROOM_ID, bg, index, player: nextPlayer });
-      return;
-    }
-
-    const timerKey = `${bg}-${index}`;
-    const prevTimer = pendingNameSyncRef.current[timerKey];
-    if (prevTimer) window.clearTimeout(prevTimer);
-    pendingNameSyncRef.current[timerKey] = window.setTimeout(() => {
-      void updatePlayerCloud({
-        roomId: ROOM_ID,
-        bg,
-        index,
-        player: { ...nextPlayer, updatedAt: Date.now() },
-      });
-      delete pendingNameSyncRef.current[timerKey];
-    }, 350);
-  };
 
   const updateBonusCount = (bg: BG, value: string) => {
     if (!canEdit) return;
@@ -767,7 +717,6 @@ export default function App() {
     }
   };
 
-  const activeMVP = bgResults[activeBG]?.mvp;
   const backupPlayerNames = useMemo(() => {
     const names = new Set<string>();
     BG_NAMES.forEach((bg) => {
@@ -1054,50 +1003,6 @@ export default function App() {
           <>
             <Card className="card-main">
               <CardContent className="card-main-content">
-                <h2 className="section-title">{activeBG}</h2>
-                <div className="table-head">
-                  <div>Slot</div>
-                  <div>Kills</div>
-                  <div>Deaths</div>
-                  <div>KD</div>
-                </div>
-
-                {data[activeBG].map((player, i) => {
-                  const kd =
-                    i === PLAYERS_PER_BG - 1
-                      ? calculateKD(player.kills, player.deaths)
-                      : calculateMainPlayerKDWithExtraPenalty(player.kills, player.deaths);
-                  const isMVP = activeMVP?.name === player.name;
-                  return (
-                    <div key={`${activeBG}-${i}`} className={`player-row ${isMVP ? "is-mvp" : ""}`}>
-                      <div className="input-player player-slot" aria-label={`Hidden player slot ${i + 1}`}>
-                        Slot {i + 1}
-                      </div>
-                      <Input
-                        type="number"
-                        className="input-num"
-                        disabled={!canEdit}
-                        value={player.kills === 0 ? "" : player.kills}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) =>
-                          updatePlayer(activeBG, i, "kills", e.target.value === "" ? 0 : Number(e.target.value))
-                        }
-                      />
-                      <Input
-                        type="number"
-                        className="input-num"
-                        disabled={!canEdit}
-                        value={player.deaths === 0 ? "" : player.deaths}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) =>
-                          updatePlayer(activeBG, i, "deaths", e.target.value === "" ? 0 : Number(e.target.value))
-                        }
-                      />
-                      <div className="kd-cell">{kd.toFixed(2)}</div>
-                    </div>
-                  );
-                })}
-
                 <div className="bonus-line">
                   <div className="bonus-label">War Bonus Count</div>
                   <div className="rival-row">
