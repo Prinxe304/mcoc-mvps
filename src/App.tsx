@@ -17,7 +17,7 @@ import { normalizeSeasonChampion, type SeasonChampion } from "./lib/seasonChampi
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
 type BG = (typeof BG_NAMES)[number];
 
-const PLAYERS_PER_BG = 10;
+const PLAYERS_PER_BG = 8;
 const TEST_WARS_TO_IGNORE = Math.max(0, Number(import.meta.env.VITE_WARS_TO_IGNORE ?? 0));
 
 const DEFAULT_CLIENT_EDITOR_EMAILS = [
@@ -146,7 +146,7 @@ const calculateBackupWarScore = (kills: number, deaths: number): number => {
 const buildBackupTrackerMigration = (data: Data, seasonTracker: SeasonTracker, historyLength: number): BackupTracker => {
   const tracker = emptyBackupTracker();
   BG_NAMES.forEach((bg) => {
-    const liveName = data[bg]?.[PLAYERS_PER_BG - 1]?.name?.trim() || `${bg}-Player10`;
+    const liveName = data[bg]?.[PLAYERS_PER_BG - 1]?.name?.trim() || `${bg}-Player8`;
     const key = liveName.toLowerCase();
     const stats = seasonTracker[key];
     const kills = Number(stats?.kills || 0);
@@ -169,9 +169,9 @@ const buildBackupTrackerMigration = (data: Data, seasonTracker: SeasonTracker, h
 const emptyBonusCounts = (): BonusCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
 const emptyDefenseCounts = (): DefenseCounts => ({ BG1: 0, BG2: 0, BG3: 0 });
 const emptyBackupTracker = (): BackupTracker => ({
-  BG1: { name: "BG1-Player10", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
-  BG2: { name: "BG2-Player10", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
-  BG3: { name: "BG3-Player10", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
+  BG1: { name: "BG1-Player8", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
+  BG2: { name: "BG2-Player8", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
+  BG3: { name: "BG3-Player8", kills: 0, deaths: 0, wars: 0, kdSum: 0, fairScoreSum: 0 },
 });
 
 const createInitialData = (existingNames: Data | null = null): Data => {
@@ -652,14 +652,14 @@ export default function App() {
       });
 
       const bgRows = data[bg] || [];
-      const backup = bgRows[PLAYERS_PER_BG - 1] || { name: `${bg}-Player10`, kills: 0, deaths: 0 };
+      const backup = bgRows[PLAYERS_PER_BG - 1] || { name: `${bg}-Player8`, kills: 0, deaths: 0 };
       const backupKills = Number((backup as any).kills || 0);
       const backupDeaths = Number((backup as any).deaths || 0);
       const backupKd = calculateKD(backupKills, backupDeaths);
       const fairScore = calculateBackupWarScore(backupKills, backupDeaths);
       const currentBackup = nextBackupTracker[bg] || emptyBackupTracker()[bg];
       nextBackupTracker[bg] = {
-        name: String((backup as any).name || currentBackup.name || `${bg}-Player10`),
+        name: String((backup as any).name || currentBackup.name || `${bg}-Player8`),
         kills: Number(currentBackup.kills || 0) + backupKills,
         deaths: Number(currentBackup.deaths || 0) + backupDeaths,
         wars: Number(currentBackup.wars || 0) + 1,
@@ -849,6 +849,7 @@ export default function App() {
   const loserBracket = seasonKdTable.length > 1 ? seasonKdTable[seasonKdTable.length - 1] : null;
   const visibleSeasonKdRows = showAllKdPlayers ? kdListSource : kdListSource.slice(0, 5);
   const playerOptions = kdListSource.map((p) => p.name);
+  const totalTrackedPlayers = BG_NAMES.length * (PLAYERS_PER_BG - 1);
   const rivalryAStats = seasonKdTable.find((p) => p.name === rivalA) ?? null;
   const rivalryBStats = seasonKdTable.find((p) => p.name === rivalB) ?? null;
   const rivalryWinner =
@@ -868,7 +869,7 @@ export default function App() {
       const fairScore = wars > 0 ? Number(stats.fairScoreSum || 0) / wars : 0;
       return {
         bg,
-        name: String(liveName || stats.name || `${bg}-Player10`),
+        name: String(liveName || stats.name || `${bg}-Player8`),
         kills: Number(stats.kills || 0),
         deaths: Number(stats.deaths || 0),
         kd,
@@ -1210,13 +1211,13 @@ export default function App() {
                     className="btn-secondary kd-toggle-btn"
                     onClick={() => setShowAllKdPlayers((prev) => !prev)}
                   >
-                    {showAllKdPlayers ? "Show Top 5" : "Show All 30"}
+                    {showAllKdPlayers ? "Show Top 5" : `Show All ${totalTrackedPlayers}`}
                   </Button>
                 </div>
               )}
 
               <div className="track-section">
-                <h3 className="track-title">Backup MVP (BG10 only)</h3>
+                <h3 className="track-title">Backup MVP (last slot only)</h3>
                 <div className="kd-track-list">
                   {backupMvpRows.map((row, i) => (
                     <div key={`backup-${row.bg}`} className="kd-track-row">

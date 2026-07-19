@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
 const BG_NAMES = ["BG1", "BG2", "BG3"] as const;
-const PLAYERS_PER_BG = 10;
+const PLAYERS_PER_BG = 8;
 const ENV = ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}) as Record<
   string,
   string | undefined
@@ -166,7 +166,7 @@ const mergeData = (existingData: any, incomingData: any) => {
   BG_NAMES.forEach((bg) => {
     const existingRows = Array.isArray(existingData?.[bg]) ? existingData[bg] : [];
     const incomingRows = Array.isArray(incomingData?.[bg]) ? incomingData[bg] : [];
-    const rowCount = Math.max(existingRows.length, incomingRows.length, PLAYERS_PER_BG);
+    const rowCount = PLAYERS_PER_BG;
     merged[bg] = Array.from({ length: rowCount }).map((_, i) => {
       const fallbackName = `${bg}-Player${i + 1}`;
       const existingPlayer = normalizePlayer(existingRows[i], fallbackName);
@@ -416,7 +416,7 @@ export const updatePlayer = mutation({
 
     const baseState = normalizeState(existing?.state ?? null);
     const rows = Array.isArray(baseState.data?.[args.bg]) ? [...baseState.data[args.bg]] : [];
-    const rowCount = Math.max(rows.length, PLAYERS_PER_BG, args.index + 1);
+    const rowCount = PLAYERS_PER_BG;
     const nextRows = Array.from({ length: rowCount }).map((_, i) =>
       normalizePlayer(rows[i], `${args.bg}-Player${i + 1}`),
     );
